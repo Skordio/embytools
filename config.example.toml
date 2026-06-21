@@ -1,0 +1,6 @@
+[server]
+# Hit the host:port directly on your LAN for dev — bypass the NPM reverse proxy.
+# On the Emby host itself use http://localhost:8096; from another LAN machine
+# use the host's LAN IP, e.g. http://192.168.1.214:8096
+base_url = "http://192.168.1.214:8096"
+api_key = "paste-your-admin-api-key-here"

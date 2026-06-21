@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "embytools"
+version = "0.1.0"
+description = "Personal tools for managing my Emby server"
+requires-python = ">=3.11"
+dependencies = ["httpx", "typer"]
+
+[project.scripts]
+embytools = "embytools.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/embytools"]
