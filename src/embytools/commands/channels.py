@@ -74,6 +74,26 @@ def channels_list(
             print_table(rows, [("Name", 30), ("Id", 0)])
 
 
+@channels_app.command("all")
+def channels_all(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")):
+    """List all Live TV channels with their sort index and channel number."""
+    with emby_session() as emby:
+        channels = emby.livetv.manage_channels()
+        rows = [
+            {
+                "SortIndex": c.get("SortIndexNumber", 0),
+                "Number": c.get("ChannelNumber") or "",
+                "Name": c["Name"],
+                "Id": c["Id"],
+            }
+            for c in channels
+        ]
+        if as_json:
+            print_json(rows)
+        else:
+            print_table(rows, [("SortIndex", 9), ("Number", 7), ("Name", 34), ("Id", 0)])
+
+
 @channels_app.command("copy")
 def channels_copy(
     source: str = typer.Argument(..., help="Source user name."),
