@@ -88,18 +88,22 @@ Write commands (`copy`, `import`) share safety conventions:
 - They're idempotent — channels already favorited are skipped, so re-running is
   safe.
 
-`channels copy` also accepts `--export <file>` to snapshot the source's
-favorites in the same run.
+`channels copy` also accepts `--export` to snapshot **both** users' favorites
+before copying — the source's, and the target's pre-copy state. Files are
+auto-named (`<user>-favorite-channels-<timestamp>.json`) into `snapshots/` by
+default, or wherever `--export-dir <dir>` points. The target snapshot is your
+safety net: it's an exact record of what the target had before the copy.
+
+Note: `import` is **additive** — it re-adds favorites but never removes any, so
+it can restore favorites that were lost, but it can't by itself undo channels a
+copy added. (A prune/replace mode is on the roadmap.)
 
 ```fish
 # Preview copying Grace's favorite channels onto Steve
 uv run embytools channels copy Grace Steve --dry-run
 
-# Do it, and save a snapshot of the source's favorites
-uv run embytools channels copy Grace Steve --export snapshots/grace.json
-
-# Restore later
-uv run embytools channels import Steve snapshots/grace.json
+# Do it, snapshotting both users' favorites first
+uv run embytools channels copy Grace Steve --export
 ```
 
 ### Export files

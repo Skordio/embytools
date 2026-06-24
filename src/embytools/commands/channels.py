@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -14,6 +15,21 @@ EXPORT_TYPE = "livetv-favorite-channels"
 def _slim(channels: list[dict]) -> list[dict]:
     """Reduce channel objects to the fields worth saving/copying."""
     return [{"Id": c["Id"], "Name": c["Name"]} for c in channels]
+
+
+def _safe_filename(name: str) -> str:
+    """Make a user name safe to use as a filename component."""
+    return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in name)
+
+
+def _snapshot_favorites(emby, export_dir: Path, users: list[tuple[dict, list[dict]]]) -> None:
+    """Write a timestamped favorites snapshot per user into export_dir."""
+    export_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for user, favorites in users:
+        path = export_dir / f"{_safe_filename(user['Name'])}-favorite-channels-{ts}.json"
+        write_export(path, EXPORT_TYPE, emby.base_url, favorites)
+        typer.echo(f"Snapshotted {len(favorites)} channel(s) for {user['Name']} -> {path}")
 
 
 def _resolve_user(emby, name: str) -> dict:
@@ -100,8 +116,13 @@ def channels_copy(
     target: str = typer.Argument(..., help="Target user name."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    export: Path = typer.Option(
-        None, "--export", help="Also write the source's favorites to this JSON file."
+    export: bool = typer.Option(
+        False,
+        "--export",
+        help="Snapshot both users' favorites (pre-copy) to --export-dir before copying.",
+    ),
+    export_dir: Path = typer.Option(
+        Path("snapshots"), "--export-dir", help="Directory for --export snapshots."
     ),
 ):
     """Copy a user's favorite Live TV channels onto another user."""
@@ -111,8 +132,14 @@ def channels_copy(
         channels = _slim(emby.livetv.favorite_channels(src["Id"]))
 
         if export:
-            write_export(export, EXPORT_TYPE, emby.base_url, channels)
-            typer.echo(f"Exported {len(channels)} channel(s) to {export}.")
+            _snapshot_favorites(
+                emby,
+                export_dir,
+                [
+                    (src, channels),
+                    (tgt, _slim(emby.livetv.favorite_channels(tgt["Id"]))),
+                ],
+            )
 
         _apply_favorites(emby, tgt, channels, dry_run, yes)
 
