@@ -40,35 +40,56 @@ def _resolve_user(emby, name: str) -> dict:
     return user
 
 
-def _apply_favorites(emby, target: dict, items: list[dict], dry_run: bool, yes: bool) -> None:
-    """Favorite each item for the target user, skipping ones already favorited.
+def _apply_favorites(
+    emby, target: dict, items: list[dict], dry_run: bool, yes: bool, replace: bool = False
+) -> None:
+    """Bring the target user's favorite channels in line with ``items``.
 
     Shared by ``copy`` and ``import``: previews the plan, then confirms before
-    writing. Idempotent — re-favoriting is a server no-op, and we skip existing
-    favorites so the preview is accurate.
+    writing. Always adds items not yet favorited. When ``replace`` is set, also
+    removes the target's existing favorites that aren't in ``items`` (exact
+    sync); otherwise removals are left alone (additive). Idempotent and
+    accurate — existing favorites are skipped so the preview matches reality.
     """
-    existing = {c["Id"] for c in emby.livetv.favorite_channels(target["Id"])}
+    existing = {c["Id"]: c["Name"] for c in emby.livetv.favorite_channels(target["Id"])}
+    desired = {i["Id"] for i in items}
     to_add = [i for i in items if i["Id"] not in existing]
+    to_remove = (
+        [{"Id": cid, "Name": name} for cid, name in existing.items() if cid not in desired]
+        if replace
+        else []
+    )
 
     typer.echo(
-        f"{len(items)} channel(s) to copy; {len(to_add)} new for {target['Name']} "
+        f"{target['Name']}: {len(to_add)} to add, {len(to_remove)} to remove "
         f"({len(items) - len(to_add)} already favorited)."
     )
     for i in to_add:
         typer.echo(f"  + {i['Name']} ({i['Id']})")
+    for i in to_remove:
+        typer.echo(f"  - {i['Name']} ({i['Id']})")
 
-    if not to_add:
-        typer.echo("Nothing to copy.")
+    if not to_add and not to_remove:
+        typer.echo("Already in sync." if replace else "Nothing to copy.")
         return
     if dry_run:
         typer.echo("Dry run — no changes made.")
         return
     if not yes:
-        typer.confirm(f"Add {len(to_add)} favorite channel(s) to {target['Name']}?", abort=True)
+        plan = f"Add {len(to_add)}"
+        if to_remove:
+            plan += f" and remove {len(to_remove)}"
+        typer.confirm(f"{plan} favorite channel(s) for {target['Name']}?", abort=True)
 
     for i in to_add:
         emby.favorites.add(target["Id"], i["Id"])
-    typer.echo(f"Done. Added {len(to_add)} favorite channel(s) to {target['Name']}.")
+    for i in to_remove:
+        emby.favorites.remove(target["Id"], i["Id"])
+
+    done = f"Added {len(to_add)}"
+    if replace:
+        done += f", removed {len(to_remove)}"
+    typer.echo(f"Done. {done} favorite channel(s) for {target['Name']}.")
 
 
 @channels_app.command("list")
@@ -116,6 +137,11 @@ def channels_copy(
     target: str = typer.Argument(..., help="Target user name."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="Make the target's favorites exactly match the source (also removes extras).",
+    ),
     export: bool = typer.Option(
         False,
         "--export",
@@ -141,7 +167,7 @@ def channels_copy(
                 ],
             )
 
-        _apply_favorites(emby, tgt, channels, dry_run, yes)
+        _apply_favorites(emby, tgt, channels, dry_run, yes, replace=replace)
 
 
 @channels_app.command("export")
@@ -163,6 +189,11 @@ def channels_import(
     file: Path = typer.Argument(..., help="Exported JSON file."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="Make the target's favorites exactly match the file (also removes extras).",
+    ),
 ):
     """Apply favorite Live TV channels from an export file to a user."""
     try:
@@ -172,4 +203,4 @@ def channels_import(
         raise typer.Exit(1)
     with emby_session() as emby:
         tgt = _resolve_user(emby, target)
-        _apply_favorites(emby, tgt, items, dry_run, yes)
+        _apply_favorites(emby, tgt, items, dry_run, yes, replace=replace)

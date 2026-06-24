@@ -94,9 +94,12 @@ auto-named (`<user>-favorite-channels-<timestamp>.json`) into `snapshots/` by
 default, or wherever `--export-dir <dir>` points. The target snapshot is your
 safety net: it's an exact record of what the target had before the copy.
 
-Note: `import` is **additive** — it re-adds favorites but never removes any, so
-it can restore favorites that were lost, but it can't by itself undo channels a
-copy added. (A prune/replace mode is on the roadmap.)
+By default `copy` and `import` are **additive** — they add favorites and never
+remove any, which is safe for merging one user's channels into another's. Pass
+`--replace` to instead make the target's favorites **exactly match** the
+source/file: channels missing from the target are added, and channels the
+target has that aren't in the source/file are removed. With `--replace`, a
+snapshot becomes a true restore point.
 
 ```fish
 # Preview copying Grace's favorite channels onto Steve
@@ -104,6 +107,12 @@ uv run embytools channels copy Grace Steve --dry-run
 
 # Do it, snapshotting both users' favorites first
 uv run embytools channels copy Grace Steve --export
+
+# Make Steve's favorites exactly match Grace's (adds + removes)
+uv run embytools channels copy Grace Steve --replace
+
+# Undo a copy by restoring Steve's pre-copy snapshot exactly
+uv run embytools channels import Steve snapshots/Steve-favorite-channels-<timestamp>.json --replace
 ```
 
 ### Export files
