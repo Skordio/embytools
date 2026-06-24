@@ -24,7 +24,6 @@ def _safe_filename(name: str) -> str:
 
 def _snapshot_favorites(emby, export_dir: Path, users: list[tuple[dict, list[dict]]]) -> None:
     """Write a timestamped favorites snapshot per user into export_dir."""
-    export_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     for user, favorites in users:
         path = export_dir / f"{_safe_filename(user['Name'])}-favorite-channels-{ts}.json"
@@ -41,7 +40,13 @@ def _resolve_user(emby, name: str) -> dict:
 
 
 def _apply_favorites(
-    emby, target: dict, items: list[dict], dry_run: bool, yes: bool, replace: bool = False
+    emby,
+    target: dict,
+    items: list[dict],
+    dry_run: bool,
+    yes: bool,
+    replace: bool = False,
+    existing_channels: list[dict] | None = None,
 ) -> None:
     """Bring the target user's favorite channels in line with ``items``.
 
@@ -50,8 +55,13 @@ def _apply_favorites(
     removes the target's existing favorites that aren't in ``items`` (exact
     sync); otherwise removals are left alone (additive). Idempotent and
     accurate — existing favorites are skipped so the preview matches reality.
+
+    Pass ``existing_channels`` to reuse an already-fetched favorites list and
+    avoid a redundant request.
     """
-    existing = {c["Id"]: c["Name"] for c in emby.livetv.favorite_channels(target["Id"])}
+    if existing_channels is None:
+        existing_channels = emby.livetv.favorite_channels(target["Id"])
+    existing = {c["Id"]: c["Name"] for c in existing_channels}
     desired = {i["Id"] for i in items}
     to_add = [i for i in items if i["Id"] not in existing]
     to_remove = (
@@ -81,14 +91,25 @@ def _apply_favorites(
             plan += f" and remove {len(to_remove)}"
         typer.confirm(f"{plan} favorite channel(s) for {target['Name']}?", abort=True)
 
-    for i in to_add:
-        emby.favorites.add(target["Id"], i["Id"])
-    for i in to_remove:
-        emby.favorites.remove(target["Id"], i["Id"])
+    added = removed = 0
+    try:
+        for i in to_add:
+            emby.favorites.add(target["Id"], i["Id"])
+            added += 1
+        for i in to_remove:
+            emby.favorites.remove(target["Id"], i["Id"])
+            removed += 1
+    except Exception:
+        typer.echo(
+            f"Aborted partway for {target['Name']}: added {added}/{len(to_add)}, "
+            f"removed {removed}/{len(to_remove)} before the error.",
+            err=True,
+        )
+        raise
 
-    done = f"Added {len(to_add)}"
+    done = f"Added {added}"
     if replace:
-        done += f", removed {len(to_remove)}"
+        done += f", removed {removed}"
     typer.echo(f"Done. {done} favorite channel(s) for {target['Name']}.")
 
 
@@ -115,7 +136,13 @@ def channels_list(
 def channels_all(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")):
     """List all Live TV channels with their sort index and channel number."""
     with emby_session() as emby:
-        channels = emby.livetv.manage_channels()
+        channels, total = emby.livetv.manage_channels()
+        if total > len(channels):
+            typer.echo(
+                f"Warning: showing {len(channels)} of {total} channels "
+                "(raise the limit to see all).",
+                err=True,
+            )
         rows = [
             {
                 "SortIndex": c.get("SortIndexNumber", 0),
@@ -157,17 +184,23 @@ def channels_copy(
         tgt = _resolve_user(emby, target)
         channels = _slim(emby.livetv.favorite_channels(src["Id"]))
 
-        if export:
-            _snapshot_favorites(
-                emby,
-                export_dir,
-                [
-                    (src, channels),
-                    (tgt, _slim(emby.livetv.favorite_channels(tgt["Id"]))),
-                ],
-            )
+        # Fetch the target's current favorites once; reused for both the
+        # snapshot and the add/remove plan below.
+        target_existing = emby.livetv.favorite_channels(tgt["Id"])
 
-        _apply_favorites(emby, tgt, channels, dry_run, yes, replace=replace)
+        if export:
+            if dry_run:
+                typer.echo("Dry run — skipping snapshots.")
+            else:
+                _snapshot_favorites(
+                    emby,
+                    export_dir,
+                    [(src, channels), (tgt, _slim(target_existing))],
+                )
+
+        _apply_favorites(
+            emby, tgt, channels, dry_run, yes, replace=replace, existing_channels=target_existing
+        )
 
 
 @channels_app.command("export")

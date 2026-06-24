@@ -9,7 +9,7 @@ from contextlib import contextmanager
 import typer
 
 from .client import EmbyClient
-from .config import load_config
+from .config import ConfigError, load_config
 from .errors import friendly_errors
 
 
@@ -17,7 +17,7 @@ from .errors import friendly_errors
 def emby_session():
     try:
         cfg = load_config()
-    except FileNotFoundError as e:
+    except ConfigError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
 

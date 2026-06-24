@@ -28,14 +28,19 @@ def write_export(path: Path, type_: str, server: str, data) -> None:
         "server": server,
         "data": data,
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
 
 
 def read_export(path: Path, expected_type: str):
     payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} is not a valid export (expected a JSON object).")
     actual = payload.get("type")
     if actual != expected_type:
         raise ValueError(
             f"{path} is a {actual!r} export, expected {expected_type!r}."
         )
+    if "data" not in payload:
+        raise ValueError(f"{path} is missing its 'data' field.")
     return payload["data"]

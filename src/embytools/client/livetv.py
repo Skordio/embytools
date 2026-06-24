@@ -1,5 +1,3 @@
-import sys
-
 from ._resource import Resource
 
 
@@ -12,22 +10,17 @@ class LiveTvAPI(Resource):
         r.raise_for_status()
         return r.json().get("Items", [])
 
-    def manage_channels(self, limit: int = 5000) -> list[dict]:
-        """All channels from the management endpoint.
+    def manage_channels(self, limit: int = 5000) -> tuple[list[dict], int]:
+        """All channels from the management endpoint, sorted by sort index.
 
         Unlike /LiveTv/Channels, this carries SortIndexNumber and ChannelNumber.
-        Returned sorted by sort index.
+        Returns ``(items, total)`` where ``total`` is the server's full count, so
+        the caller can tell when the result was truncated by ``limit``.
         """
         r = self._http.get("/LiveTv/Manage/Channels", params={"Limit": limit})
         r.raise_for_status()
         payload = r.json()
         items = payload.get("Items", [])
         total = payload.get("TotalRecordCount", len(items))
-        if total > len(items):
-            print(
-                f"Warning: showing {len(items)} of {total} channels "
-                f"(raise the limit to see all).",
-                file=sys.stderr,
-            )
         items.sort(key=lambda c: c.get("SortIndexNumber") or 0)
-        return items
+        return items, total
