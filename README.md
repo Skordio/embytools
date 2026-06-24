@@ -14,14 +14,6 @@ The first tool copies a user's favorite **Live TV channels** onto another user
 and snapshots them to a file; more admin tools (sessions/playback, user
 management, library control, server ops) are on the roadmap below.
 
-## Design principle
-
-embytools talks to Emby's **REST API**, not its database. Per-user state like
-favorites is just user-data attached to server-global library items, so it's
-expressed cleanly through the API — no stopping the server, no backups, no
-schema drift between Emby versions. The database is reserved for things the API
-genuinely can't express.
-
 ## Requirements
 
 - Python ≥ 3.11
@@ -67,7 +59,7 @@ Run any command with `uv run`:
 
 ```fish
 uv run embytools users list
-uv run embytools channels list Grace
+uv run embytools channels list Steve
 ```
 
 Add `--help` to any command or subcommand to see its options.
