@@ -1,3 +1,5 @@
+import sys
+
 from ._resource import Resource
 
 
@@ -18,6 +20,14 @@ class LiveTvAPI(Resource):
         """
         r = self._http.get("/LiveTv/Manage/Channels", params={"Limit": limit})
         r.raise_for_status()
-        items = r.json().get("Items", [])
-        items.sort(key=lambda c: c.get("SortIndexNumber", 0))
+        payload = r.json()
+        items = payload.get("Items", [])
+        total = payload.get("TotalRecordCount", len(items))
+        if total > len(items):
+            print(
+                f"Warning: showing {len(items)} of {total} channels "
+                f"(raise the limit to see all).",
+                file=sys.stderr,
+            )
+        items.sort(key=lambda c: c.get("SortIndexNumber") or 0)
         return items
