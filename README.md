@@ -115,6 +115,33 @@ uv run embytools channels copy Grace Steve --replace
 uv run embytools channels import Steve snapshots/Steve-favorite-channels-<timestamp>.json --replace
 ```
 
+### Sessions & playback
+
+| Command | Description |
+| --- | --- |
+| `sessions list` | List active sessions (signed-in user clients). `--all` includes anonymous/service connections; `--playing` shows only sessions currently streaming; `--json` supported. |
+| `sessions message <target> <text>` | Display a popup message on a session. `--header`, `--timeout`. |
+| `sessions stop <target>` | Stop playback on a session. |
+| `sessions pause <target>` / `sessions unpause <target>` | Pause / resume playback. |
+
+`<target>` matches a session by **user name**, **device name**, or **session
+id prefix**. Sessions that don't allow remote control are skipped with a notice.
+If a target matches more than one controllable session, the command lists them
+and asks you to narrow it or pass `--all`. The write commands (`message`,
+`stop`, `pause`, `unpause`) follow the same safety convention as channel writes:
+`--dry-run` previews, and they confirm before sending unless `-y`/`--yes`.
+
+```fish
+# See who's connected
+uv run embytools sessions list
+
+# Pause the Living Room TV (preview first)
+uv run embytools sessions pause "Living Room Onn" --dry-run
+
+# Send someone a message
+uv run embytools sessions message Steve "Server going down for maintenance in 10 min"
+```
+
 ### Export files
 
 Exports use a self-describing envelope so files are safe to re-apply later:

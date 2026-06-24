@@ -17,10 +17,12 @@ src/embytools/
 │   ├── _resource.py      #   Resource base
 │   ├── users.py          #   emby.users
 │   ├── livetv.py         #   emby.livetv
-│   └── favorites.py      #   emby.favorites
+│   ├── favorites.py      #   emby.favorites
+│   └── sessions.py       #   emby.sessions
 └── commands/             # one module per domain, each a typer sub-app
     ├── users.py          #   users_app
-    └── channels.py       #   channels_app
+    ├── channels.py       #   channels_app
+    └── sessions.py       #   sessions_app
 ```
 
 ## How to add a tool
@@ -52,18 +54,19 @@ logic.
 Validated and built:
 
 - `users list`
-- `channels list / copy / export / import` — the first real tool. Copy proven
-  valid: channel favorites are per-user user-data on a server-global item, so
-  the same `ItemId` works for every user.
+- `channels list / all / copy / export / import` — the first real tool. Copy
+  proven valid: channel favorites are per-user user-data on a server-global
+  item, so the same `ItemId` works for every user.
+- `sessions list / message / stop / pause / unpause` — active sessions and
+  playback control. Lists signed-in user clients by default; write commands
+  target a session by user name, device name, or id prefix, skip sessions that
+  don't allow remote control, and follow the dry-run/confirm convention.
 
 Next domains, in priority order:
 
-1. **Sessions / playback** — `sessions list` (who's streaming), `message`,
-   `stop`. (`GET /Sessions`, `POST /Sessions/{id}/Message`, playback control.)
-2. **User management** — create/delete, enable/disable, set-admin,
+1. **User management** — create/delete, enable/disable, set-admin,
    reset-password, and `users copy-policy` (reuses the export envelope).
-3. **Library control** — list libraries, trigger scan/refresh, stats.
+2. **Library control** — list libraries, trigger scan/refresh, stats.
    (`GET /Library/VirtualFolders`, `POST /Library/Refresh`.)
-4. **Server ops** — server info, scheduled tasks, restart/shutdown; later,
+3. **Server ops** — server info, scheduled tasks, restart/shutdown; later,
    multiple-server connection profiles.
-```
