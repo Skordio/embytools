@@ -160,6 +160,15 @@ Imports verify the `type` before applying, so you can't accidentally feed the
 wrong kind of file to the wrong command. Snapshotting favorites before a risky
 server change (e.g. reconfiguring Live TV) is the recommended safety net.
 
+## Development
+
+Dev dependencies (pytest, respx) install automatically with `uv sync`. Run the
+test suite — it mocks the Emby API with `respx`, so no live server is needed:
+
+```fish
+uv run pytest
+```
+
 ## Architecture & roadmap
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how the project is structured and how
