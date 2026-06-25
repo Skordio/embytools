@@ -62,7 +62,9 @@ uv run embytools users list
 uv run embytools channels list Steve
 ```
 
-Add `--help` to any command or subcommand to see its options.
+Add `--help` to any command or subcommand to see its options. The sections below
+are a quickstart; for the full per-command reference (every argument, option, and
+examples) see **[docs/commands](docs/commands/README.md)**.
 
 ### Users
 
