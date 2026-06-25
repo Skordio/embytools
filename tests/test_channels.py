@@ -117,6 +117,113 @@ def test_fetches_existing_when_not_provided():
     assert emby.favorites.added == [("u", "2")]
 
 
+def test_import_resolves_stale_ids_by_name():
+    # The file's ids are stale (e.g. after an M3U domain change); name_to_id
+    # maps the channel names to the server's current ids.
+    emby = FakeEmby()
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("OLD1", "CNN"), ch("OLD2", "Fox")],
+        dry_run=False,
+        yes=True,
+        existing_channels=[],
+        name_to_id={"CNN": "new1", "Fox": "new2"},
+    )
+    # Favorited by current ids, not the stale ones from the file.
+    assert emby.favorites.added == [("u", "new1"), ("u", "new2")]
+
+
+def test_import_skips_name_absent_from_server(capsys):
+    emby = FakeEmby()
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("OLD1", "CNN"), ch("OLD2", "Gone")],
+        dry_run=False,
+        yes=True,
+        existing_channels=[],
+        name_to_id={"CNN": "new1"},  # "Gone" no longer exists on the server
+    )
+    assert emby.favorites.added == [("u", "new1")]
+    assert "Gone" in capsys.readouterr().err
+
+
+def test_already_favorited_matched_by_name_not_id():
+    # The target already has CNN, but under a different (current) id than the
+    # file records — matching by name must treat it as already favorited.
+    emby = FakeEmby()
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("OLD", "CNN")],
+        dry_run=False,
+        yes=True,
+        existing_channels=[ch("cur", "CNN")],
+        name_to_id={"CNN": "cur"},
+    )
+    assert emby.favorites.added == []
+
+
+def test_replace_removes_extras_by_name():
+    emby = FakeEmby()
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("OLD", "CNN")],
+        dry_run=False,
+        yes=True,
+        replace=True,
+        existing_channels=[ch("cur", "CNN"), ch("x", "Old")],
+        name_to_id={"CNN": "cur"},
+    )
+    assert emby.favorites.added == []  # CNN already present by name
+    assert emby.favorites.removed == [("u", "x")]  # removed by its current id
+
+
+def test_snapshot_cb_fires_before_write_but_not_on_dry_run():
+    calls = []
+    emby = FakeEmby()
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("1", "CNN")],
+        dry_run=True,
+        yes=True,
+        existing_channels=[],
+        name_to_id={"CNN": "1"},
+        snapshot_cb=lambda: calls.append(1),
+    )
+    assert calls == []  # dry run writes nothing, snapshots nothing
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("1", "CNN")],
+        dry_run=False,
+        yes=True,
+        existing_channels=[],
+        name_to_id={"CNN": "1"},
+        snapshot_cb=lambda: calls.append(1),
+    )
+    assert calls == [1]  # real write: snapshot taken first
+
+
+def test_snapshot_cb_skipped_when_nothing_to_change():
+    calls = []
+    emby = FakeEmby()
+    _apply_favorites(
+        emby,
+        {"Id": "u", "Name": "T"},
+        [ch("1", "CNN")],
+        dry_run=False,
+        yes=True,
+        existing_channels=[ch("1", "CNN")],
+        name_to_id={"CNN": "1"},
+        snapshot_cb=lambda: calls.append(1),
+    )
+    assert calls == []  # already in sync — no snapshot, no write
+
+
 def test_partial_failure_reports_progress_and_raises(capsys):
     emby = FakeEmby(fail_on_add="2")
     with pytest.raises(RuntimeError):

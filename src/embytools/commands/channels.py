@@ -49,37 +49,65 @@ def _apply_favorites(
     yes: bool,
     replace: bool = False,
     existing_channels: list[dict] | None = None,
+    name_to_id: dict[str, str] | None = None,
+    snapshot_cb=None,
 ) -> None:
     """Bring the target user's favorite channels in line with ``items``.
 
-    Shared by ``copy`` and ``import``: previews the plan, then confirms before
-    writing. Always adds items not yet favorited. When ``replace`` is set, also
-    removes the target's existing favorites that aren't in ``items`` (exact
-    sync); otherwise removals are left alone (additive). Idempotent and
-    accurate — existing favorites are skipped so the preview matches reality.
+    Channels are matched by **name**, not id. ``items`` may come from an export
+    file whose ids are stale (Emby regenerates channel ids when the upstream M3U
+    source changes domain), so each desired channel is resolved to the target's
+    *current* id via ``name_to_id``. When ``name_to_id`` is omitted the ids
+    carried by ``items`` are used — correct for live ``copy``, where source and
+    target share one server snapshot.
+
+    Shared by ``copy`` and ``import``: previews the plan, runs ``snapshot_cb``
+    (if given) and confirms before writing. Always adds items not yet favorited
+    (by name). When ``replace`` is set, also removes the target's existing
+    favorites whose names aren't in ``items`` (exact sync); otherwise removals
+    are left alone (additive). Idempotent and accurate — favorites already
+    present by name are skipped so the preview matches reality.
 
     Pass ``existing_channels`` to reuse an already-fetched favorites list and
     avoid a redundant request.
     """
     if existing_channels is None:
         existing_channels = emby.livetv.favorite_channels(target["Id"])
-    existing = {c["Id"]: c["Name"] for c in existing_channels}
-    desired = {i["Id"] for i in items}
-    to_add = [i for i in items if i["Id"] not in existing]
+    if name_to_id is None:
+        name_to_id = {i["Name"]: i["Id"] for i in items}
+
+    existing_names = {c["Name"] for c in existing_channels}
+    desired_names = {i["Name"] for i in items}
+
+    to_add: list[tuple[str, str]] = []  # (name, current id)
+    unresolved: list[str] = []  # desired names with no channel on the server
+    seen: set[str] = set()
+    for i in items:
+        name = i["Name"]
+        if name in existing_names or name in seen:
+            continue
+        seen.add(name)
+        cid = name_to_id.get(name)
+        if cid is None:
+            unresolved.append(name)
+        else:
+            to_add.append((name, cid))
     to_remove = (
-        [{"Id": cid, "Name": name} for cid, name in existing.items() if cid not in desired]
+        [(c["Name"], c["Id"]) for c in existing_channels if c["Name"] not in desired_names]
         if replace
         else []
     )
 
     typer.echo(
         f"{target['Name']}: {len(to_add)} to add, {len(to_remove)} to remove "
-        f"({len(items) - len(to_add)} already favorited)."
+        f"({len(desired_names & existing_names)} already favorited)."
     )
-    for i in to_add:
-        typer.echo(f"  + {i['Name']} ({i['Id']})")
-    for i in to_remove:
-        typer.echo(f"  - {i['Name']} ({i['Id']})")
+    for name, cid in to_add:
+        typer.echo(f"  + {name} ({cid})")
+    for name, cid in to_remove:
+        typer.echo(f"  - {name} ({cid})")
+    for name in unresolved:
+        typer.echo(f"  ! no channel named {name!r} on the server, skipped.", err=True)
 
     if not to_add and not to_remove:
         typer.echo("Already in sync." if replace else "Nothing to copy.")
@@ -87,6 +115,8 @@ def _apply_favorites(
     if dry_run:
         typer.echo("Dry run — no changes made.")
         return
+    if snapshot_cb:
+        snapshot_cb()
     if not yes:
         plan = f"Add {len(to_add)}"
         if to_remove:
@@ -95,11 +125,11 @@ def _apply_favorites(
 
     added = removed = 0
     try:
-        for i in to_add:
-            emby.favorites.add(target["Id"], i["Id"])
+        for name, cid in to_add:
+            emby.favorites.add(target["Id"], cid)
             added += 1
-        for i in to_remove:
-            emby.favorites.remove(target["Id"], i["Id"])
+        for name, cid in to_remove:
+            emby.favorites.remove(target["Id"], cid)
             removed += 1
     except Exception:
         typer.echo(
@@ -190,6 +220,10 @@ def channels_copy(
         # snapshot and the add/remove plan below.
         target_existing = emby.livetv.favorite_channels(tgt["Id"])
 
+        # --export snapshots both users up front. Otherwise, a --replace copy
+        # is a destructive write, so snapshot the target as a safety net (fired
+        # by _apply_favorites only when there's actually something to change).
+        cb = None
         if export:
             if dry_run:
                 typer.echo("Dry run — skipping snapshots.")
@@ -199,9 +233,18 @@ def channels_copy(
                     export_dir,
                     [(src, channels), (tgt, _slim(target_existing))],
                 )
+        elif replace:
+            cb = lambda: _snapshot_favorites(emby, export_dir, [(tgt, _slim(target_existing))])
 
         _apply_favorites(
-            emby, tgt, channels, dry_run, yes, replace=replace, existing_channels=target_existing
+            emby,
+            tgt,
+            channels,
+            dry_run,
+            yes,
+            replace=replace,
+            existing_channels=target_existing,
+            snapshot_cb=cb,
         )
 
 
@@ -229,6 +272,12 @@ def channels_import(
         "--replace",
         help="Make the target's favorites exactly match the file (also removes extras).",
     ),
+    snapshot: bool = typer.Option(
+        True, "--snapshot/--no-snapshot", help="Back up the target's current favorites first."
+    ),
+    export_dir: Path = typer.Option(
+        Path("snapshots"), "--export-dir", help="Directory for the pre-import snapshot."
+    ),
 ):
     """Apply favorite Live TV channels from an export file to a user."""
     try:
@@ -238,7 +287,26 @@ def channels_import(
         raise typer.Exit(1)
     with emby_session() as emby:
         tgt = _resolve_user(emby, target)
-        _apply_favorites(emby, tgt, items, dry_run, yes, replace=replace)
+        existing = emby.livetv.favorite_channels(tgt["Id"])
+        # Resolve the file's channel names to the target's current channel ids,
+        # so favorites survive an upstream id regeneration (match by name).
+        name_to_id = {c["Name"]: c["Id"] for c in emby.livetv.all_channels(tgt["Id"])}
+        cb = (
+            (lambda: _snapshot_favorites(emby, export_dir, [(tgt, _slim(existing))]))
+            if snapshot
+            else None
+        )
+        _apply_favorites(
+            emby,
+            tgt,
+            items,
+            dry_run,
+            yes,
+            replace=replace,
+            existing_channels=existing,
+            name_to_id=name_to_id,
+            snapshot_cb=cb,
+        )
 
 
 # --- Channel numbering -------------------------------------------------------

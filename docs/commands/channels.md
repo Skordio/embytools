@@ -104,9 +104,12 @@ uv run embytools channels copy Grace Steve --replace
 
 **Notes**
 
-- Idempotent: channels already favorited on the target are skipped.
-- With `--dry-run`, `--export` snapshots are **not** written (dry-run writes
-  nothing).
+- Idempotent: channels already favorited on the target are skipped (matched by
+  name).
+- `--replace` is destructive (it removes the target's extra favorites), so the
+  target's pre-copy favorites are snapshotted automatically even without
+  `--export`. Pass `--export` to additionally snapshot the source.
+- With `--dry-run`, snapshots are **not** written (dry-run writes nothing).
 
 ---
 
@@ -142,7 +145,7 @@ by **name**.
 **Synopsis**
 
 ```
-embytools channels import <target> <file> [--replace] [--dry-run] [--yes]
+embytools channels import <target> <file> [--replace] [--no-snapshot] [--export-dir <dir>] [--dry-run] [--yes]
 ```
 
 **Arguments**
@@ -156,6 +159,8 @@ embytools channels import <target> <file> [--replace] [--dry-run] [--yes]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--replace` | off | Make the target's favorites **exactly match** the file — adds missing and removes extras. Without it, the import is additive. |
+| `--snapshot` / `--no-snapshot` | `--snapshot` | Back up the target's current favorites before applying. |
+| `--export-dir <dir>` | `snapshots` | Directory for the pre-import snapshot. |
 | `--dry-run` | off | Preview the plan without writing. |
 | `--yes`, `-y` | off | Skip the confirmation prompt. |
 
@@ -171,7 +176,11 @@ uv run embytools channels import Steve snapshots/steve-favorites.json --replace
 
 **Notes**
 
-- Because matching is by name, a backup keeps working even after the upstream
-  source regenerates channel ids. `--replace` makes a snapshot a true restore
-  point (it removes favorites not in the file); plain import only adds.
+- Matching is by **name**: the file's channel names are resolved to the server's
+  *current* channel ids, so a backup keeps working even after the upstream
+  source regenerates channel ids. A channel name in the file that no longer
+  exists on the server is reported and skipped.
+- The target's current favorites are snapshotted before applying (disable with
+  `--no-snapshot`). `--replace` makes a snapshot a true restore point (it removes
+  favorites not in the file); plain import only adds.
 - Reading a file that isn't a valid favorites export fails with a clear message.

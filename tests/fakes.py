@@ -18,7 +18,13 @@ class FakeFavorites:
 
 class FakeLiveTv:
     def __init__(
-        self, favorites_by_user=None, manage=None, fail_on_set=None, tagged=None, fail_on_tag=None
+        self,
+        favorites_by_user=None,
+        manage=None,
+        fail_on_set=None,
+        tagged=None,
+        fail_on_tag=None,
+        all_chans=None,
     ):
         self.favorites_by_user = favorites_by_user or {}
         self.manage = manage or []
@@ -27,9 +33,13 @@ class FakeLiveTv:
         self.tagged = tagged or []
         self.fail_on_tag = fail_on_tag
         self.tag_calls = []
+        self.all_chans = all_chans or []
 
     def favorite_channels(self, user_id):
         return list(self.favorites_by_user.get(user_id, []))
+
+    def all_channels(self, user_id, limit=5000):
+        return list(self.all_chans)
 
     def manage_channels(self, limit=5000):
         return list(self.manage), len(self.manage)
@@ -111,8 +121,11 @@ class FakeEmby:
         fail_on_set=None,
         tagged=None,
         fail_on_tag=None,
+        all_chans=None,
     ):
         self.favorites = FakeFavorites(fail_on_add)
-        self.livetv = FakeLiveTv(favorites_by_user, manage, fail_on_set, tagged, fail_on_tag)
+        self.livetv = FakeLiveTv(
+            favorites_by_user, manage, fail_on_set, tagged, fail_on_tag, all_chans
+        )
         self.users = FakeUsers(users)
         self.sessions = FakeSessions(sessions)

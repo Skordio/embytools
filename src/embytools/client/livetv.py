@@ -10,6 +10,19 @@ class LiveTvAPI(Resource):
         r.raise_for_status()
         return r.json().get("Items", [])
 
+    def all_channels(self, user_id: str, limit: int = 5000) -> list[dict]:
+        """Every Live TV channel visible to a user (Id + Name).
+
+        Used to resolve channel *names* to the server's current ids — favorites
+        are restored by name, not by the (regenerable) ids saved in an export.
+        """
+        r = self._http.get(
+            "/LiveTv/Channels",
+            params={"UserId": user_id, "Limit": limit},
+        )
+        r.raise_for_status()
+        return r.json().get("Items", [])
+
     def manage_channels(self, limit: int = 5000) -> tuple[list[dict], int]:
         """All channels from the management endpoint, sorted by sort index.
 

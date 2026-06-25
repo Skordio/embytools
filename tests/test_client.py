@@ -44,6 +44,18 @@ def test_favorite_channels_extracts_items():
 
 
 @respx.mock
+def test_all_channels_requests_user_and_limit():
+    route = respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(200, json={"Items": [{"Id": "1", "Name": "CNN"}]})
+    )
+    with EmbyClient(BASE, "k") as e:
+        assert e.livetv.all_channels("u") == [{"Id": "1", "Name": "CNN"}]
+    params = route.calls.last.request.url.params
+    assert params["UserId"] == "u"
+    assert params["Limit"] == "5000"
+
+
+@respx.mock
 def test_manage_channels_sorts_and_returns_total():
     items = [
         {"Id": "a", "Name": "A", "SortIndexNumber": 2},

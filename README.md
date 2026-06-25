@@ -103,6 +103,13 @@ source/file: channels missing from the target are added, and channels the
 target has that aren't in the source/file are removed. With `--replace`, a
 snapshot becomes a true restore point.
 
+Favorites are matched by **channel name**, not id: `import` resolves the file's
+names to the server's current channel ids, so a backup still restores correctly
+after an upstream M3U change regenerates those ids. Both destructive paths back
+up first — `import` snapshots the target by default (`--no-snapshot` to skip),
+and a `--replace` `copy` snapshots the target automatically even without
+`--export`.
+
 ```fish
 # Preview copying Grace's favorite channels onto Steve
 uv run embytools channels copy Grace Steve --dry-run

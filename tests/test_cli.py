@@ -6,7 +6,7 @@ import respx
 from typer.testing import CliRunner
 
 from embytools.cli import app
-from embytools.commands.channels import NUMBER_TYPE
+from embytools.commands.channels import EXPORT_TYPE, NUMBER_TYPE
 from embytools.envelope import write_export
 
 runner = CliRunner()
@@ -84,6 +84,33 @@ def test_channels_copy_dry_run_cli(cli_env):
     assert res.exit_code == 0
     assert "1 to add" in res.output
     assert "Dry run" in res.output
+
+
+@respx.mock
+def test_channels_import_is_name_keyed(cli_env, tmp_path):
+    # Export file records CNN under a STALE id; the server now serves CNN under
+    # a new id. Import must favorite the current id, resolved by name.
+    f = tmp_path / "favs.json"
+    write_export(f, EXPORT_TYPE, "http://test", [{"Id": "stale", "Name": "CNN"}])
+    respx.get(f"{BASE}/Users").mock(
+        return_value=httpx.Response(200, json=[{"Name": "Steve", "Id": "s"}])
+    )
+    respx.get(f"{BASE}/LiveTv/Channels", params={"UserId": "s", "IsFavorite": "true"}).mock(
+        return_value=httpx.Response(200, json={"Items": []})
+    )
+    respx.get(f"{BASE}/LiveTv/Channels", params={"UserId": "s", "Limit": "5000"}).mock(
+        return_value=httpx.Response(200, json={"Items": [{"Id": "new", "Name": "CNN"}]})
+    )
+    fav = respx.post(f"{BASE}/Users/s/FavoriteItems/new").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    stale = respx.post(f"{BASE}/Users/s/FavoriteItems/stale").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    res = runner.invoke(app, ["channels", "import", "Steve", str(f), "--no-snapshot", "-y"])
+    assert res.exit_code == 0
+    assert fav.called  # favorited by the current id
+    assert not stale.called  # never touches the stale id from the file
 
 
 @respx.mock
