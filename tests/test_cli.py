@@ -135,6 +135,14 @@ def test_channels_numbers_schemes_lists_plugin():
     assert "favorites-bands" in res.output
 
 
+def test_schemes_empty_without_plugin():
+    # Relies on the autouse reset_schemes fixture: no scheme should leak in from
+    # other tests that loaded plugins in this same process.
+    res = runner.invoke(app, ["channels", "numbers", "schemes"])
+    assert res.exit_code == 0
+    assert "No schemes registered" in res.output
+
+
 @respx.mock
 def test_channels_numbers_generate_with_plugin(cli_env, tmp_path):
     plugin = tmp_path / "p.py"
