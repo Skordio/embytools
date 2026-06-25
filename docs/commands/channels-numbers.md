@@ -170,12 +170,18 @@ wipe. Restore later with `channels numbers apply <file>`.
 **Synopsis**
 
 ```
-embytools channels numbers export <file>
+embytools channels numbers export <file> [--allow-empty]
 ```
 
 **Arguments**
 
 - `file` (required) — destination JSON path.
+
+**Options**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--allow-empty` | off | Allow overwriting an existing file with an empty export (refused by default so a transient empty read can't clobber a good backup). |
 
 **Examples**
 

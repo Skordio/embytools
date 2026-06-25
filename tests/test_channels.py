@@ -3,15 +3,70 @@ import typer
 from fakes import FakeEmby
 
 from embytools.commands.channels import (
+    EXPORT_TYPE,
     _apply_favorites,
+    _first_user_id,
+    _guarded_export,
     _resolve_user,
     _safe_filename,
     _slim,
+    _validate_items,
 )
+from embytools.envelope import read_export, write_export
 
 
 def ch(id_, name):
     return {"Id": id_, "Name": name}
+
+
+def test_first_user_id_prefers_admin():
+    emby = FakeEmby(
+        users=[
+            {"Name": "Kid", "Id": "k", "Policy": {"IsAdministrator": False}},
+            {"Name": "Admin", "Id": "a", "Policy": {"IsAdministrator": True}},
+        ]
+    )
+    assert _first_user_id(emby) == "a"
+
+
+def test_first_user_id_falls_back_to_first_when_no_admin_flag():
+    emby = FakeEmby(users=[{"Name": "A", "Id": "1"}, {"Name": "B", "Id": "2"}])
+    assert _first_user_id(emby) == "1"
+
+
+def test_validate_items_flags_missing_key():
+    with pytest.raises(ValueError):
+        _validate_items([{"Name": "CNN"}], ["Name", "Number"], "numbering file")
+
+
+def test_validate_items_rejects_non_dict_entry():
+    with pytest.raises(ValueError):
+        _validate_items(["nope"], ["Name"], "favorites export")
+
+
+def test_validate_items_accepts_well_formed():
+    _validate_items([{"Name": "CNN", "Number": "5"}], ["Name", "Number"], "ok")  # no raise
+
+
+def test_guarded_export_refuses_empty_overwrite(tmp_path):
+    f = tmp_path / "b.json"
+    write_export(f, EXPORT_TYPE, "http://h", [{"Name": "CNN"}])  # an existing good backup
+    with pytest.raises(typer.Exit):
+        _guarded_export(f, EXPORT_TYPE, "http://h", [], "favorites", allow_empty=False)
+    assert read_export(f, EXPORT_TYPE) == [{"Name": "CNN"}]  # left intact
+
+
+def test_guarded_export_allows_empty_with_flag(tmp_path):
+    f = tmp_path / "b.json"
+    write_export(f, EXPORT_TYPE, "http://h", [{"Name": "CNN"}])
+    _guarded_export(f, EXPORT_TYPE, "http://h", [], "favorites", allow_empty=True)
+    assert read_export(f, EXPORT_TYPE) == []
+
+
+def test_guarded_export_writes_non_empty(tmp_path):
+    f = tmp_path / "b.json"
+    _guarded_export(f, EXPORT_TYPE, "http://h", [{"Name": "CNN"}], "favorites", allow_empty=False)
+    assert read_export(f, EXPORT_TYPE) == [{"Name": "CNN"}]
 
 
 def test_slim_keeps_only_id_and_name():

@@ -121,13 +121,19 @@ keyed by channel name and id).
 **Synopsis**
 
 ```
-embytools channels export <user> <file>
+embytools channels export <user> <file> [--allow-empty]
 ```
 
 **Arguments**
 
 - `user` (required) — user whose favorites to export.
 - `file` (required) — destination JSON path (parent directories are created).
+
+**Options**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--allow-empty` | off | Allow overwriting an existing file with an empty export. By default, exporting zero channels over an existing file is refused (a transient empty read won't clobber a good backup). |
 
 **Examples**
 

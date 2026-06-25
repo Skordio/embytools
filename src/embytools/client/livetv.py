@@ -1,16 +1,21 @@
 from ._resource import Resource
 
+# Upper bound for "give me every channel" reads. Sent explicitly on every
+# channel list so the result never silently falls back to the server's default
+# page size. Comfortably above any realistic Live TV lineup.
+CHANNEL_LIMIT = 100000
+
 
 class LiveTvAPI(Resource):
-    def favorite_channels(self, user_id: str) -> list[dict]:
+    def favorite_channels(self, user_id: str, limit: int = CHANNEL_LIMIT) -> list[dict]:
         r = self._http.get(
             "/LiveTv/Channels",
-            params={"UserId": user_id, "IsFavorite": "true"},
+            params={"UserId": user_id, "IsFavorite": "true", "Limit": limit},
         )
         r.raise_for_status()
         return r.json().get("Items", [])
 
-    def all_channels(self, user_id: str, limit: int = 5000) -> list[dict]:
+    def all_channels(self, user_id: str, limit: int = CHANNEL_LIMIT) -> list[dict]:
         """Every Live TV channel visible to a user (Id + Name).
 
         Used to resolve channel *names* to the server's current ids — favorites
@@ -23,7 +28,7 @@ class LiveTvAPI(Resource):
         r.raise_for_status()
         return r.json().get("Items", [])
 
-    def manage_channels(self, limit: int = 5000) -> tuple[list[dict], int]:
+    def manage_channels(self, limit: int = CHANNEL_LIMIT) -> tuple[list[dict], int]:
         """All channels from the management endpoint, sorted by sort index.
 
         Unlike /LiveTv/Channels, this carries SortIndexNumber and ChannelNumber.
@@ -63,7 +68,7 @@ class LiveTvAPI(Resource):
         self.update_item(item)
 
     # --- Tags ---
-    def channels_with_tags(self, user_id: str, limit: int = 5000) -> list[dict]:
+    def channels_with_tags(self, user_id: str, limit: int = CHANNEL_LIMIT) -> list[dict]:
         """All channels with their tags (``TagItems``), one request."""
         r = self._http.get(
             "/LiveTv/Channels",
@@ -72,11 +77,11 @@ class LiveTvAPI(Resource):
         r.raise_for_status()
         return r.json().get("Items", [])
 
-    def channels_by_tag(self, user_id: str, tag: str) -> list[dict]:
+    def channels_by_tag(self, user_id: str, tag: str, limit: int = CHANNEL_LIMIT) -> list[dict]:
         """Channels that carry ``tag``."""
         r = self._http.get(
             "/LiveTv/Channels",
-            params={"UserId": user_id, "Tags": tag, "Fields": "Tags"},
+            params={"UserId": user_id, "Tags": tag, "Fields": "Tags", "Limit": limit},
         )
         r.raise_for_status()
         return r.json().get("Items", [])

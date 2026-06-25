@@ -52,7 +52,7 @@ def test_all_channels_requests_user_and_limit():
         assert e.livetv.all_channels("u") == [{"Id": "1", "Name": "CNN"}]
     params = route.calls.last.request.url.params
     assert params["UserId"] == "u"
-    assert params["Limit"] == "5000"
+    assert params["Limit"] == "100000"
 
 
 @respx.mock

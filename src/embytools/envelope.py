@@ -35,7 +35,10 @@ def write_export(path: Path, type_: str, server: str, data, meta: dict | None = 
     if meta is not None:
         payload["meta"] = meta
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2))
+    # Write atomically: a crash mid-write must not truncate an existing backup.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.replace(path)
 
 
 def _load(path: Path, expected_type: str) -> dict:

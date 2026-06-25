@@ -10,9 +10,10 @@ write safety, name-keyed matching, and snapshots.
 > Tags come from the source, so an M3U refresh can reset channel tags (the same
 > wipe risk as channel numbers). `export` your tags so `import` can restore them.
 
-Reads use one request (`GET /LiveTv/Channels?Fields=Tags`); the write commands
-(`add`, `remove`, `set`, `import`) follow the house convention — `--dry-run`,
-confirm unless `--yes`/`-y`, idempotent, and partial-progress on failure.
+Reads use one request (`GET /LiveTv/Channels?Fields=Tags`), scoped to an
+administrator so every channel is visible; the write commands (`add`, `remove`,
+`set`, `import`) follow the house convention — `--dry-run`, confirm unless
+`--yes`/`-y`, idempotent, and partial-progress on failure.
 
 ---
 
@@ -105,7 +106,8 @@ uv run embytools channels tags add Favorites "CNN USA"
 
 - Idempotent: channels that already have the tag are skipped.
 - Channel names that match no channel, or match more than one, are reported and
-  skipped.
+  skipped. If **none** of the given names resolve, the command exits non-zero
+  (so a typo doesn't look like success in a script).
 
 ---
 
@@ -175,7 +177,7 @@ channel's other tags (see `import` below).
 **Synopsis**
 
 ```
-embytools channels tags export <file> [--tag <tag>]
+embytools channels tags export <file> [--tag <tag>] [--allow-empty]
 ```
 
 **Arguments**
@@ -186,7 +188,8 @@ embytools channels tags export <file> [--tag <tag>]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--tag <tag>` | none | Only export channels having this tag. |
+| `--tag <tag>` | none | Only export channels having this tag (writes a single-tag membership file). |
+| `--allow-empty` | off | Allow overwriting an existing file with an empty export (refused by default so a transient empty read can't clobber a good backup). |
 
 **Examples**
 

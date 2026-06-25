@@ -98,7 +98,7 @@ def test_channels_import_is_name_keyed(cli_env, tmp_path):
     respx.get(f"{BASE}/LiveTv/Channels", params={"UserId": "s", "IsFavorite": "true"}).mock(
         return_value=httpx.Response(200, json={"Items": []})
     )
-    respx.get(f"{BASE}/LiveTv/Channels", params={"UserId": "s", "Limit": "5000"}).mock(
+    respx.get(f"{BASE}/LiveTv/Channels", params={"UserId": "s", "Limit": "100000"}).mock(
         return_value=httpx.Response(200, json={"Items": [{"Id": "new", "Name": "CNN"}]})
     )
     fav = respx.post(f"{BASE}/Users/s/FavoriteItems/new").mock(
@@ -233,6 +233,30 @@ def test_channels_tags_list_cli(cli_env):
     res = runner.invoke(app, ["channels", "tags", "list"])
     assert res.exit_code == 0
     assert "News" in res.output and "Sports" in res.output
+
+
+@respx.mock
+def test_tags_add_unmatched_channel_exits_nonzero(cli_env):
+    respx.get(f"{BASE}/Users").mock(
+        return_value=httpx.Response(200, json=[{"Name": "Steve", "Id": "s"}])
+    )
+    respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(
+            200, json={"Items": [{"Id": "1", "Name": "CNN", "TagItems": []}]}
+        )
+    )
+    res = runner.invoke(app, ["channels", "tags", "add", "Fav", "Nope", "-y"])
+    assert res.exit_code == 1  # no channel matched -> failure, not silent success
+
+
+@respx.mock
+def test_numbers_apply_malformed_file_is_friendly(cli_env, tmp_path):
+    f = tmp_path / "n.json"
+    write_export(f, NUMBER_TYPE, "http://test", [{"Name": "CNN"}])  # missing "Number"
+    res = runner.invoke(app, ["channels", "numbers", "apply", str(f), "--dry-run"])
+    assert res.exit_code == 1
+    assert "missing" in res.output  # friendly message, not a traceback
+    assert "Traceback" not in res.output
 
 
 @respx.mock

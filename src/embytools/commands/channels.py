@@ -24,6 +24,46 @@ def _safe_filename(name: str) -> str:
     return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in name)
 
 
+def _managed_channels(emby) -> list[dict]:
+    """Every channel from the management endpoint, warning if the server
+    truncated the result so callers never silently miss channels."""
+    channels, total = emby.livetv.manage_channels()
+    if total > len(channels):
+        typer.echo(
+            f"Warning: showing {len(channels)} of {total} channels "
+            "(server truncated the result).",
+            err=True,
+        )
+    return channels
+
+
+def _validate_items(items, required: list[str], label: str) -> None:
+    """Check an imported ``data`` list has the expected per-item shape, raising
+    a friendly ``ValueError`` (caught with the read errors) rather than letting
+    a ``KeyError`` surface deep in the apply loop after writes have begun."""
+    if not isinstance(items, list):
+        raise ValueError(f"{label}: 'data' must be a list.")
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"{label}: entry {idx} is not an object.")
+        missing = [k for k in required if k not in item]
+        if missing:
+            raise ValueError(f"{label}: entry {idx} is missing {', '.join(missing)}.")
+
+
+def _guarded_export(file: Path, type_: str, server: str, data, label: str, allow_empty: bool, meta=None) -> None:
+    """Write an export, refusing to clobber an existing file with empty data
+    (a transient empty fetch would otherwise destroy a good backup)."""
+    if not data and file.exists() and not allow_empty:
+        typer.echo(
+            f"Refusing to overwrite {file} with an empty {label} export "
+            "(nothing found to export). Pass --allow-empty to force.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    write_export(file, type_, server, data, meta=meta)
+
+
 def _snapshot_favorites(emby, export_dir: Path, users: list[tuple[dict, list[dict]]]) -> None:
     """Write a timestamped favorites snapshot per user into export_dir."""
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -115,13 +155,13 @@ def _apply_favorites(
     if dry_run:
         typer.echo("Dry run — no changes made.")
         return
-    if snapshot_cb:
-        snapshot_cb()
     if not yes:
         plan = f"Add {len(to_add)}"
         if to_remove:
             plan += f" and remove {len(to_remove)}"
         typer.confirm(f"{plan} favorite channel(s) for {target['Name']}?", abort=True)
+    if snapshot_cb:
+        snapshot_cb()
 
     added = removed = 0
     try:
@@ -168,13 +208,7 @@ def channels_list(
 def channels_all(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")):
     """List all Live TV channels with their sort index and channel number."""
     with emby_session() as emby:
-        channels, total = emby.livetv.manage_channels()
-        if total > len(channels):
-            typer.echo(
-                f"Warning: showing {len(channels)} of {total} channels "
-                "(raise the limit to see all).",
-                err=True,
-            )
+        channels = _managed_channels(emby)
         rows = [
             {
                 "SortIndex": c.get("SortIndexNumber", 0),
@@ -252,12 +286,15 @@ def channels_copy(
 def channels_export(
     user: str = typer.Argument(..., help="User name."),
     file: Path = typer.Argument(..., help="Destination JSON file."),
+    allow_empty: bool = typer.Option(
+        False, "--allow-empty", help="Allow overwriting a file with an empty export."
+    ),
 ):
     """Export a user's favorite Live TV channels to a JSON file."""
     with emby_session() as emby:
         u = _resolve_user(emby, user)
         channels = _slim(emby.livetv.favorite_channels(u["Id"]))
-        write_export(file, EXPORT_TYPE, emby.base_url, channels)
+        _guarded_export(file, EXPORT_TYPE, emby.base_url, channels, "favorites", allow_empty)
         typer.echo(f"Exported {len(channels)} channel(s) to {file}.")
 
 
@@ -282,6 +319,7 @@ def channels_import(
     """Apply favorite Live TV channels from an export file to a user."""
     try:
         items = read_export(file, EXPORT_TYPE)
+        _validate_items(items, ["Name"], "favorites export")
     except (ValueError, KeyError, OSError) as e:
         typer.echo(f"Could not read export: {e}", err=True)
         raise typer.Exit(1)
@@ -315,11 +353,20 @@ numbers_app = typer.Typer(help="Assign and back up Live TV channel numbers.")
 
 
 def _first_user_id(emby) -> str:
-    """Any user id, used only as the context for fetching editable item DTOs."""
+    """A user id to scope channel reads / DTO fetches to.
+
+    Prefers an administrator, who can see every Live TV channel — a restricted
+    first user would hide channels, making tag reads incomplete and writes
+    report real channels as "missing". Falls back to the first user if no admin
+    is flagged.
+    """
     users = emby.users.list()
     if not users:
         typer.echo("No users found on the server.", err=True)
         raise typer.Exit(1)
+    for u in users:
+        if (u.get("Policy") or {}).get("IsAdministrator"):
+            return u["Id"]
     return users[0]["Id"]
 
 
@@ -356,10 +403,8 @@ def _write_numbers(emby, plan: list[tuple[dict, str]]) -> None:
 
 def _apply_numbers(emby, desired: list[dict], dry_run: bool, yes: bool, snapshot: bool, export_dir: Path) -> None:
     """Set channel numbers from a desired list, matching channels by name."""
-    channels, _ = emby.livetv.manage_channels()
-    by_name: dict[str, list[dict]] = {}
-    for c in channels:
-        by_name.setdefault(c["Name"], []).append(c)
+    channels = _managed_channels(emby)
+    by_name = _channels_by_name(channels)
 
     plan: list[tuple[dict, str]] = []
     missing: list[str] = []
@@ -395,10 +440,10 @@ def _apply_numbers(emby, desired: list[dict], dry_run: bool, yes: bool, snapshot
     if dry_run:
         typer.echo("Dry run — no changes made.")
         return
-    if snapshot:
-        _snapshot_numbers(emby, export_dir, channels)
     if not yes:
         typer.confirm(f"Set numbers on {len(plan)} channel(s)?", abort=True)
+    if snapshot:
+        _snapshot_numbers(emby, export_dir, channels)
     _write_numbers(emby, plan)
 
 
@@ -449,7 +494,7 @@ def numbers_generate(
         raise typer.Exit(1)
     options = _parse_opts(opt)
     with emby_session() as emby:
-        channels, _ = emby.livetv.manage_channels()
+        channels = _managed_channels(emby)
         ctx = SchemeContext(emby=emby, channels=channels, options=options)
         try:
             data = fn(ctx)
@@ -487,12 +532,17 @@ def numbers_schemes(
 
 
 @numbers_app.command("export")
-def numbers_export(file: Path = typer.Argument(..., help="Destination JSON file.")):
+def numbers_export(
+    file: Path = typer.Argument(..., help="Destination JSON file."),
+    allow_empty: bool = typer.Option(
+        False, "--allow-empty", help="Allow overwriting a file with an empty export."
+    ),
+):
     """Back up current channel numbers (name-keyed) to a file."""
     with emby_session() as emby:
-        channels, _ = emby.livetv.manage_channels()
+        channels = _managed_channels(emby)
         data = _current_numbers(channels)
-        write_export(file, NUMBER_TYPE, emby.base_url, data)
+        _guarded_export(file, NUMBER_TYPE, emby.base_url, data, "channel-numbers", allow_empty)
         typer.echo(f"Exported {len(data)} channel number(s) -> {file}")
 
 
@@ -511,6 +561,7 @@ def numbers_apply(
     """Apply channel numbers from a file, matching channels by name."""
     try:
         desired = read_export(file, NUMBER_TYPE)
+        _validate_items(desired, ["Name", "Number"], "numbering file")
     except (ValueError, KeyError, OSError) as e:
         typer.echo(f"Could not read numbering file: {e}", err=True)
         raise typer.Exit(1)
@@ -531,7 +582,7 @@ def numbers_clear(
 ):
     """Clear the number on every channel that has one (sets empty string)."""
     with emby_session() as emby:
-        channels, _ = emby.livetv.manage_channels()
+        channels = _managed_channels(emby)
         numbered = [c for c in channels if c.get("ChannelNumber")]
         typer.echo(f"{len(numbered)} channel(s) have a number to clear.")
         for c in numbered[:50]:
@@ -541,10 +592,10 @@ def numbers_clear(
         if dry_run:
             typer.echo("Dry run — no changes made.")
             return
-        if snapshot:
-            _snapshot_numbers(emby, export_dir, channels)
         if not yes:
             typer.confirm(f"Clear numbers on {len(numbered)} channel(s)?", abort=True)
+        if snapshot:
+            _snapshot_numbers(emby, export_dir, channels)
         _write_numbers(emby, [(c, "") for c in numbered])
 
 
@@ -570,8 +621,9 @@ def _channels_by_name(channels: list[dict]) -> dict[str, list[dict]]:
     return by_name
 
 
-def _resolve_channels(by_name: dict, names: list[str]) -> list[dict]:
+def _resolve_channels(channels: list[dict], names: list[str]) -> list[dict]:
     """Resolve channel names to single channels, reporting missing/ambiguous."""
+    by_name = _channels_by_name(channels)
     resolved = []
     for name in names:
         matches = by_name.get(name, [])
@@ -610,10 +662,10 @@ def _apply_tag_changes(emby, plan, dry_run: bool, yes: bool, snapshot_cb=None) -
     if dry_run:
         typer.echo("Dry run — no changes made.")
         return
-    if snapshot_cb:
-        snapshot_cb()
     if not yes:
         typer.confirm(f"Apply tag changes to {len(plan)} channel(s)?", abort=True)
+    if snapshot_cb:
+        snapshot_cb()
 
     done = 0
     try:
@@ -673,15 +725,16 @@ def tags_show(
 ):
     """Show a channel's tags."""
     with emby_session() as emby:
-        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
-        resolved = _resolve_channels(by_name, [channel])
+        resolved = _resolve_channels(emby.livetv.channels_with_tags(_first_user_id(emby)), [channel])
         if not resolved:
             raise typer.Exit(1)
         tags = sorted(_tag_names(resolved[0]))
         if as_json:
             print_json(tags)
+        elif tags:
+            print_table([{"Tag": t} for t in tags], [("Tag", 0)])
         else:
-            typer.echo(", ".join(tags) if tags else "(no tags)")
+            typer.echo("(no tags)")
 
 
 @tags_app.command("add")
@@ -693,8 +746,9 @@ def tags_add(
 ):
     """Add a tag to one or more channels."""
     with emby_session() as emby:
-        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
-        resolved = _resolve_channels(by_name, channels)
+        resolved = _resolve_channels(emby.livetv.channels_with_tags(_first_user_id(emby)), channels)
+        if not resolved:
+            raise typer.Exit(1)
         plan = [(c, {tag} - set(_tag_names(c)), set()) for c in resolved]
         _apply_tag_changes(emby, plan, dry_run, yes)
 
@@ -708,8 +762,9 @@ def tags_remove(
 ):
     """Remove a tag from one or more channels."""
     with emby_session() as emby:
-        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
-        resolved = _resolve_channels(by_name, channels)
+        resolved = _resolve_channels(emby.livetv.channels_with_tags(_first_user_id(emby)), channels)
+        if not resolved:
+            raise typer.Exit(1)
         plan = [(c, set(), {tag} & set(_tag_names(c))) for c in resolved]
         _apply_tag_changes(emby, plan, dry_run, yes)
 
@@ -723,8 +778,7 @@ def tags_set(
 ):
     """Set a channel's tags exactly — adds missing and removes the rest."""
     with emby_session() as emby:
-        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
-        resolved = _resolve_channels(by_name, [channel])
+        resolved = _resolve_channels(emby.livetv.channels_with_tags(_first_user_id(emby)), [channel])
         if not resolved:
             raise typer.Exit(1)
         c = resolved[0]
@@ -737,6 +791,9 @@ def tags_set(
 def tags_export(
     file: Path = typer.Argument(..., help="Destination JSON file."),
     tag: str = typer.Option(None, "--tag", help="Only export channels having this tag."),
+    allow_empty: bool = typer.Option(
+        False, "--allow-empty", help="Allow overwriting a file with an empty export."
+    ),
 ):
     """Export channel tags (name-keyed) to a file."""
     with emby_session() as emby:
@@ -749,21 +806,26 @@ def tags_export(
         else:
             data = [{"Name": c["Name"], "Tags": _tag_names(c)} for c in channels if _tag_names(c)]
             meta = None
-        write_export(file, TAGS_TYPE, emby.base_url, data, meta=meta)
+        _guarded_export(file, TAGS_TYPE, emby.base_url, data, "channel-tags", allow_empty, meta=meta)
         typer.echo(f"Exported tags for {len(data)} channel(s) -> {file}")
 
 
-def _tag_import_plan(channels: list[dict], desired: list[dict], scope_tag: str | None, replace: bool):
+def _tag_import_plan(
+    channels: list[dict],
+    resolved: list[dict],
+    desired: list[dict],
+    scope_tag: str | None,
+    replace: bool,
+):
     """Build the (channel, to_add, to_remove) plan for ``tags import``.
 
+    ``resolved`` is the subset of ``channels`` matched to the file by name.
     ``scope_tag`` set (a single-tag membership file): add that tag to the listed
     channels, and with ``replace`` also remove it from channels *not* listed —
     a membership sync that never touches a channel's other tags. ``scope_tag``
     None (a full export): per-channel exact tag set under ``replace``, additive
     otherwise.
     """
-    by_name = _channels_by_name(channels)
-    resolved = _resolve_channels(by_name, [d["Name"] for d in desired])
     plan = []
     if scope_tag:
         listed = {d["Name"] for d in desired}
@@ -801,13 +863,18 @@ def tags_import(
     """Apply channel tags from a file, matching channels by name."""
     try:
         desired, meta = read_export_meta(file, TAGS_TYPE)
+        _validate_items(desired, ["Name"], "tag file")
     except (ValueError, KeyError, OSError) as e:
         typer.echo(f"Could not read tag file: {e}", err=True)
         raise typer.Exit(1)
     scope_tag = meta.get("tag") if isinstance(meta, dict) and meta.get("scope") == "tag" else None
     with emby_session() as emby:
         channels = emby.livetv.channels_with_tags(_first_user_id(emby))
-        plan = _tag_import_plan(channels, desired, scope_tag, replace)
+        resolved = _resolve_channels(channels, [d["Name"] for d in desired])
+        if desired and not resolved:
+            typer.echo("None of the file's channels matched one on the server.", err=True)
+            raise typer.Exit(1)
+        plan = _tag_import_plan(channels, resolved, desired, scope_tag, replace)
         cb = (lambda: _snapshot_tags(emby, export_dir, channels)) if snapshot else None
         _apply_tag_changes(emby, plan, dry_run, yes, snapshot_cb=cb)
 
