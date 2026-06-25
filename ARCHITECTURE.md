@@ -56,9 +56,10 @@ Validated and built:
 
 - `users list`
 - `channels list / all / copy / export / import` and `channels numbers
-  schemes / generate / apply / export / clear` (name-keyed channel numbering,
-  with pluggable `generate` schemes via `numbering.py` + `--plugin`). The first
-  real tool. Copy
+  schemes / generate / apply / export / clear` (name-keyed channel numbering).
+  `generate` has no built-in schemes — it always loads a scheme function from a
+  `--plugin` file (`numbering.py` is the registry/helpers; example plugins live
+  in `schemes/`). The first real tool. Copy
   proven valid: channel favorites are per-user user-data on a server-global
   item, so the same `ItemId` works for every user.
 - `sessions list / message / stop / pause / unpause` — active sessions and

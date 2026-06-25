@@ -118,15 +118,21 @@ uv run embytools channels import Steve snapshots/Steve-favorite-channels-<timest
 ### Channel numbering
 
 Assign Live TV channel **numbers** so clients that sort by number show your
-channels in a meaningful order. A numbering is produced by a **scheme** (a
-pluggable function) and applied to the server. The built-in `favorites-bands`
-scheme puts a user's favorites in the low band (1–999) and everything else in
-the high band (1000+), each evenly spaced to leave gaps for later reordering.
+channels in a meaningful order. A numbering is produced by a **scheme** — a
+function you supply via `--plugin`. There are no built-in schemes; `generate`
+always requires a plugin. Example schemes:
+
+- **`favorites-bands`** — ships in the repo at `schemes/favorites_bands.py`: a
+  user's favorites in the low band (1–999), everything else high (1000+), evenly
+  spaced with gaps.
+- **`categories`** — a personal scheme (kept out of git) at
+  `snapshots/categorize.py`: favorites grouped into ordered categories (News
+  first, …), alphabetical within each.
 
 | Command | Description |
 | --- | --- |
-| `channels numbers schemes` | List available schemes (add `--plugin file.py` to include yours). |
-| `channels numbers generate <scheme> <file>` | Run a scheme and write the numbering to a file (no server changes). Pass scheme options with `--opt key=value` and load custom schemes with `--plugin file.py`. |
+| `channels numbers schemes --plugin file.py` | List the schemes a plugin provides. |
+| `channels numbers generate <scheme> <file> --plugin file.py` | Run a scheme from a plugin and write the numbering to a file (no server changes). Pass scheme options with `--opt key=value`. `--plugin` is required. |
 | `channels numbers apply <file>` | Set channel numbers from a file, matching channels **by name**. Idempotent; `--dry-run`, confirmation, and a pre-apply snapshot (`--no-snapshot` to skip). |
 | `channels numbers export <file>` | Back up current channel numbers (name-keyed). |
 | `channels numbers clear` | Remove numbers from all numbered channels. |
@@ -138,8 +144,9 @@ source changes domain (which regenerates channel ids and can wipe numbers),
 back up regularly with `export` (or rely on the automatic pre-apply snapshot).
 
 ```fish
-# Generate using the built-in scheme from Steve's favorites, review, then apply
-uv run embytools channels numbers generate favorites-bands numbers.json --opt user=Steve
+# Generate with the favorites-bands plugin, review, then apply
+uv run embytools channels numbers generate favorites-bands numbers.json \
+    --plugin schemes/favorites_bands.py --opt user=Steve
 uv run embytools channels numbers apply numbers.json --dry-run
 uv run embytools channels numbers apply numbers.json
 
@@ -147,7 +154,7 @@ uv run embytools channels numbers apply numbers.json
 uv run embytools channels numbers apply numbers.json
 ```
 
-#### Custom schemes
+#### Writing a scheme
 
 A scheme is a function that takes a `SchemeContext` and returns a name-keyed
 numbering (`[{"Name", "Number"}, …]`). Write one in a `.py` file, register it
@@ -168,10 +175,9 @@ uv run embytools channels numbers generate alpha out.json --plugin my_schemes.py
 ```
 
 `ctx` also offers `ctx.favorite_names("Steve")`, `ctx.options` (from `--opt`),
-and `ctx.int_opt(key, default)`. A larger worked example — favorites grouped
-into ordered categories — lives in `snapshots/categorize.py` (the `categories`
-scheme). Note `--plugin` executes the file's Python, so only load schemes you
-trust.
+and `ctx.int_opt(key, default)`. See `schemes/favorites_bands.py` and
+`snapshots/categorize.py` for the shipped examples. Note `--plugin` executes the
+file's Python, so only load schemes you trust.
 
 Whether channels actually display in number order is a per-client sort setting
 you control in Emby — this tool only assigns the numbers.

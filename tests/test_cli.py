@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import httpx
 import respx
@@ -10,6 +11,7 @@ from embytools.envelope import write_export
 
 runner = CliRunner()
 BASE = "http://test"
+FAV_PLUGIN = str(Path(__file__).parent.parent / "schemes" / "favorites_bands.py")
 
 
 @respx.mock
@@ -107,7 +109,10 @@ def test_channels_numbers_generate_cli(cli_env, tmp_path):
     out = tmp_path / "nums.json"
     res = runner.invoke(
         app,
-        ["channels", "numbers", "generate", "favorites-bands", str(out), "--opt", "user=Steve"],
+        [
+            "channels", "numbers", "generate", "favorites-bands", str(out),
+            "--plugin", FAV_PLUGIN, "--opt", "user=Steve",
+        ],
     )
     assert res.exit_code == 0
     data = json.loads(out.read_text())["data"]
@@ -116,8 +121,16 @@ def test_channels_numbers_generate_cli(cli_env, tmp_path):
     assert nums["Junk"] >= 1000
 
 
-def test_channels_numbers_schemes_lists_builtin():
-    res = runner.invoke(app, ["channels", "numbers", "schemes"])
+def test_generate_requires_plugin(cli_env, tmp_path):
+    res = runner.invoke(
+        app, ["channels", "numbers", "generate", "favorites-bands", str(tmp_path / "x.json")]
+    )
+    assert res.exit_code == 1
+    assert "requires at least one --plugin" in res.output
+
+
+def test_channels_numbers_schemes_lists_plugin():
+    res = runner.invoke(app, ["channels", "numbers", "schemes", "--plugin", FAV_PLUGIN])
     assert res.exit_code == 0
     assert "favorites-bands" in res.output
 

@@ -4,9 +4,10 @@ A *scheme* is a function that, given a ``SchemeContext``, returns a name-keyed
 numbering: ``list[{"Name": str, "Number": str}]``. ``channels numbers generate``
 runs a scheme by name and writes its output to a file for ``apply`` to consume.
 
-Built-in schemes register themselves with the ``@scheme`` decorator. Users add
-their own by writing a ``.py`` file that imports from this module and decorates
-functions, then loading it with ``--plugin``:
+Schemes always come from plugins — ``generate`` requires at least one
+``--plugin`` file and there are no built-ins. Write a ``.py`` file that imports
+from this module and decorates functions, then load it with ``--plugin``.
+Example schemes ship in the repo's ``schemes/`` directory:
 
     # my_schemes.py
     from embytools.numbering import scheme, even_fill
@@ -98,18 +99,3 @@ class SchemeContext:
             return int(self.options.get(key, default))
         except ValueError:
             raise ValueError(f"--opt {key} must be an integer, got {self.options[key]!r}.")
-
-
-@scheme("favorites-bands")
-def favorites_bands(ctx: SchemeContext) -> list[dict]:
-    """A user's favorites in a low band, everything else high, alphabetical.
-
-    Options: user=<name> (required); fav_start/fav_end/other_start/other_end.
-    """
-    user = ctx.require_opt("user")
-    fav_band = (ctx.int_opt("fav_start", 1), ctx.int_opt("fav_end", 999))
-    other_band = (ctx.int_opt("other_start", 1000), ctx.int_opt("other_end", 9999))
-    favorites = ctx.favorite_names(user)
-    favs = [c["Name"] for c in ctx.channels if c["Name"] in favorites]
-    others = [c["Name"] for c in ctx.channels if c["Name"] not in favorites]
-    return even_fill(favs, *fav_band) + even_fill(others, *other_band)

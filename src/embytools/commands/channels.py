@@ -365,7 +365,14 @@ def numbers_generate(
         None, "--plugin", help="Load scheme(s) from a .py file (repeatable)."
     ),
 ):
-    """Generate a channel numbering using a named scheme."""
+    """Generate a channel numbering using a scheme from a --plugin file."""
+    if not plugin:
+        typer.echo(
+            "generate requires at least one --plugin <file.py> providing the scheme "
+            "(e.g. schemes/favorites_bands.py). See `channels numbers schemes --plugin ...`.",
+            err=True,
+        )
+        raise typer.Exit(1)
     _load_plugins(plugin)
     try:
         fn = get_scheme(scheme_name)
