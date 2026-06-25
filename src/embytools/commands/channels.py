@@ -4,6 +4,7 @@ from pathlib import Path
 import typer
 
 from ..envelope import read_export, write_export
+from ..numbering import SCHEMES, SchemeContext, get_scheme, load_plugin
 from ..output import print_json, print_table
 from ..session import emby_session
 
@@ -245,42 +246,6 @@ def channels_import(
 numbers_app = typer.Typer(help="Assign and back up Live TV channel numbers.")
 
 
-def _even_fill(names: list[str], lo: int, hi: int) -> list[tuple[str, str]]:
-    """Spread names across the band [lo, hi], maximizing even gaps.
-
-    Channel i gets number lo + i*step, where step packs the band as loosely as
-    it can while keeping every channel inside it. Numbers are returned as strings
-    (Emby's channel-number field is a string).
-    """
-    n = len(names)
-    if n == 0:
-        return []
-    capacity = hi - lo + 1
-    if n > capacity:
-        raise ValueError(
-            f"{n} channels can't fit in band {lo}-{hi} ({capacity} slots); widen the band."
-        )
-    step = max(1, capacity // n)
-    return [(name, str(lo + i * step)) for i, name in enumerate(names)]
-
-
-def _assign_numbers(
-    channels: list[dict],
-    favorite_names: set[str],
-    fav_band: tuple[int, int],
-    other_band: tuple[int, int],
-) -> list[dict]:
-    """Build an ordered, name-keyed numbering: favorites low, others high.
-
-    ``channels`` is the management list (already in sort-index / alphabetical
-    order); that order is preserved within each band.
-    """
-    fav_order = [c["Name"] for c in channels if c["Name"] in favorite_names]
-    other_order = [c["Name"] for c in channels if c["Name"] not in favorite_names]
-    assigned = _even_fill(fav_order, *fav_band) + _even_fill(other_order, *other_band)
-    return [{"Name": name, "Number": number} for name, number in assigned]
-
-
 def _first_user_id(emby) -> str:
     """Any user id, used only as the context for fetching editable item DTOs."""
     users = emby.users.list()
@@ -369,30 +334,81 @@ def _apply_numbers(emby, desired: list[dict], dry_run: bool, yes: bool, snapshot
     _write_numbers(emby, plan)
 
 
+def _parse_opts(opts: list[str]) -> dict[str, str]:
+    parsed = {}
+    for item in opts or []:
+        if "=" not in item:
+            typer.echo(f"--opt must be key=value, got {item!r}.", err=True)
+            raise typer.Exit(1)
+        key, value = item.split("=", 1)
+        parsed[key] = value
+    return parsed
+
+
+def _load_plugins(plugins: list[Path]) -> None:
+    for path in plugins or []:
+        try:
+            load_plugin(path)
+        except Exception as e:  # surface any plugin error as a friendly message
+            typer.echo(f"Could not load plugin {path}: {e}", err=True)
+            raise typer.Exit(1)
+
+
 @numbers_app.command("generate")
 def numbers_generate(
-    favorites_user: str = typer.Argument(..., help="User whose favorites get the low band."),
+    scheme_name: str = typer.Argument(..., help="Scheme name (see `channels numbers schemes`)."),
     file: Path = typer.Argument(..., help="Destination JSON file."),
-    fav_start: int = typer.Option(1, "--fav-start", help="Favorites band start."),
-    fav_end: int = typer.Option(999, "--fav-end", help="Favorites band end."),
-    other_start: int = typer.Option(1000, "--other-start", help="Others band start."),
-    other_end: int = typer.Option(9999, "--other-end", help="Others band end."),
+    opt: list[str] = typer.Option(
+        None, "--opt", help="Scheme option as key=value (repeatable), e.g. --opt user=Steve."
+    ),
+    plugin: list[Path] = typer.Option(
+        None, "--plugin", help="Load scheme(s) from a .py file (repeatable)."
+    ),
 ):
-    """Generate a proposed channel numbering (favorites low, others high)."""
+    """Generate a channel numbering using a named scheme."""
+    _load_plugins(plugin)
+    try:
+        fn = get_scheme(scheme_name)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    options = _parse_opts(opt)
     with emby_session() as emby:
-        u = _resolve_user(emby, favorites_user)
-        fav_names = {c["Name"] for c in emby.livetv.favorite_channels(u["Id"])}
         channels, _ = emby.livetv.manage_channels()
+        ctx = SchemeContext(emby=emby, channels=channels, options=options)
         try:
-            data = _assign_numbers(
-                channels, fav_names, (fav_start, fav_end), (other_start, other_end)
-            )
-        except ValueError as e:
-            typer.echo(str(e), err=True)
+            data = fn(ctx)
+        except (ValueError, KeyError) as e:
+            typer.echo(f"Scheme {scheme_name!r} failed: {e}", err=True)
             raise typer.Exit(1)
+        if not isinstance(data, list) or not all(
+            isinstance(d, dict) and "Name" in d and "Number" in d for d in data
+        ):
+            typer.echo(
+                f"Scheme {scheme_name!r} must return a list of {{'Name','Number'}} dicts.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        data = [{"Name": d["Name"], "Number": str(d["Number"])} for d in data]
         write_export(file, NUMBER_TYPE, emby.base_url, data)
-        favs = sum(1 for d in data if d["Name"] in fav_names)
-        typer.echo(f"Wrote numbering for {len(data)} channels ({favs} favorites) -> {file}")
+        typer.echo(f"Wrote numbering for {len(data)} channels -> {file}")
+
+
+@numbers_app.command("schemes")
+def numbers_schemes(
+    plugin: list[Path] = typer.Option(
+        None, "--plugin", help="Also load scheme(s) from a .py file (repeatable)."
+    ),
+):
+    """List available numbering schemes."""
+    _load_plugins(plugin)
+    if not SCHEMES:
+        typer.echo("No schemes registered.")
+        return
+    for name in sorted(SCHEMES):
+        doc = (SCHEMES[name].__doc__ or "").strip().splitlines()
+        summary = doc[0] if doc else ""
+        typer.echo(f"{name:<18} {summary}")
 
 
 @numbers_app.command("export")

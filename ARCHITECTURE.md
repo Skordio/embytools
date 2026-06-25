@@ -12,6 +12,7 @@ src/embytools/
 ├── output.py             # print_json / print_table (human table vs --json)
 ├── errors.py             # friendly_errors — HTTP/connection failures → clean messages
 ├── envelope.py           # self-describing JSON export/import wrapper
+├── numbering.py          # pluggable channel-numbering schemes (registry + helpers)
 ├── client/               # the Emby API, split into resource namespaces
 │   ├── core.py           #   EmbyClient — holds one httpx client + namespaces
 │   ├── _resource.py      #   Resource base
@@ -55,7 +56,8 @@ Validated and built:
 
 - `users list`
 - `channels list / all / copy / export / import` and `channels numbers
-  generate / apply / export / clear` (name-keyed channel numbering). The first
+  schemes / generate / apply / export / clear` (name-keyed channel numbering,
+  with pluggable `generate` schemes via `numbering.py` + `--plugin`). The first
   real tool. Copy
   proven valid: channel favorites are per-user user-data on a server-global
   item, so the same `ItemId` works for every user.

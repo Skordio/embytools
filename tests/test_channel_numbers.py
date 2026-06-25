@@ -1,41 +1,8 @@
 import pytest
 from fakes import FakeEmby
 
-from embytools.commands.channels import (
-    NUMBER_TYPE,
-    _apply_numbers,
-    _assign_numbers,
-    _even_fill,
-)
+from embytools.commands.channels import NUMBER_TYPE, _apply_numbers
 from embytools.envelope import read_export, write_export
-
-
-def test_even_fill_spacing():
-    # capacity 10, n 3 -> step 3 -> 1, 4, 7
-    assert _even_fill(["a", "b", "c"], 1, 10) == [("a", "1"), ("b", "4"), ("c", "7")]
-
-
-def test_even_fill_empty():
-    assert _even_fill([], 1, 10) == []
-
-
-def test_even_fill_single():
-    assert _even_fill(["x"], 5, 9) == [("x", "5")]
-
-
-def test_even_fill_overflow_raises():
-    with pytest.raises(ValueError):
-        _even_fill(["a", "b", "c"], 1, 2)  # only 2 slots for 3 channels
-
-
-def test_assign_numbers_partitions_and_preserves_order():
-    channels = [{"Name": "CNN"}, {"Name": "Junk1"}, {"Name": "Fox"}, {"Name": "Junk2"}]
-    data = _assign_numbers(channels, {"CNN", "Fox"}, (1, 999), (1000, 9999))
-    nums = {d["Name"]: int(d["Number"]) for d in data}
-    assert nums["CNN"] < 1000 and nums["Fox"] < 1000
-    assert nums["Junk1"] >= 1000 and nums["Junk2"] >= 1000
-    fav_order = [d["Name"] for d in data if int(d["Number"]) < 1000]
-    assert fav_order == ["CNN", "Fox"]  # original order kept within the band
 
 
 def test_number_envelope_round_trip(tmp_path):

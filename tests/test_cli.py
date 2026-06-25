@@ -105,12 +105,50 @@ def test_channels_numbers_generate_cli(cli_env, tmp_path):
         )
     )
     out = tmp_path / "nums.json"
-    res = runner.invoke(app, ["channels", "numbers", "generate", "Steve", str(out)])
+    res = runner.invoke(
+        app,
+        ["channels", "numbers", "generate", "favorites-bands", str(out), "--opt", "user=Steve"],
+    )
     assert res.exit_code == 0
     data = json.loads(out.read_text())["data"]
     nums = {d["Name"]: int(d["Number"]) for d in data}
     assert nums["CNN"] < 1000
     assert nums["Junk"] >= 1000
+
+
+def test_channels_numbers_schemes_lists_builtin():
+    res = runner.invoke(app, ["channels", "numbers", "schemes"])
+    assert res.exit_code == 0
+    assert "favorites-bands" in res.output
+
+
+@respx.mock
+def test_channels_numbers_generate_with_plugin(cli_env, tmp_path):
+    plugin = tmp_path / "p.py"
+    plugin.write_text(
+        "from embytools.numbering import scheme, even_fill\n"
+        "@scheme('alpha-test')\n"
+        "def a(ctx):\n"
+        "    names = sorted(c['Name'] for c in ctx.channels)\n"
+        "    return even_fill(names, 1, 100)\n"
+    )
+    respx.get(f"{BASE}/LiveTv/Manage/Channels").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "Items": [{"Id": "1", "Name": "Zed"}, {"Id": "2", "Name": "Abc"}],
+                "TotalRecordCount": 2,
+            },
+        )
+    )
+    out = tmp_path / "out.json"
+    res = runner.invoke(
+        app,
+        ["channels", "numbers", "generate", "alpha-test", str(out), "--plugin", str(plugin)],
+    )
+    assert res.exit_code == 0
+    data = json.loads(out.read_text())["data"]
+    assert [d["Name"] for d in data] == ["Abc", "Zed"]  # plugin sorted them
 
 
 @respx.mock
