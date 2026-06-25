@@ -3,7 +3,7 @@ from pathlib import Path
 
 import typer
 
-from ..envelope import read_export, write_export
+from ..envelope import read_export, read_export_meta, write_export
 from ..numbering import SCHEMES, SchemeContext, get_scheme, load_plugin
 from ..output import print_json, print_table
 from ..session import emby_session
@@ -742,11 +742,45 @@ def tags_export(
     with emby_session() as emby:
         channels = emby.livetv.channels_with_tags(_first_user_id(emby))
         if tag:
-            data = [{"Name": c["Name"], "Tags": [tag]} for c in channels if tag in _tag_names(c)]
+            # Membership of a single tag: record just the channel names, and mark
+            # the scope so `import` syncs only this tag (never the others).
+            data = [{"Name": c["Name"]} for c in channels if tag in _tag_names(c)]
+            meta = {"scope": "tag", "tag": tag}
         else:
             data = [{"Name": c["Name"], "Tags": _tag_names(c)} for c in channels if _tag_names(c)]
-        write_export(file, TAGS_TYPE, emby.base_url, data)
+            meta = None
+        write_export(file, TAGS_TYPE, emby.base_url, data, meta=meta)
         typer.echo(f"Exported tags for {len(data)} channel(s) -> {file}")
+
+
+def _tag_import_plan(channels: list[dict], desired: list[dict], scope_tag: str | None, replace: bool):
+    """Build the (channel, to_add, to_remove) plan for ``tags import``.
+
+    ``scope_tag`` set (a single-tag membership file): add that tag to the listed
+    channels, and with ``replace`` also remove it from channels *not* listed —
+    a membership sync that never touches a channel's other tags. ``scope_tag``
+    None (a full export): per-channel exact tag set under ``replace``, additive
+    otherwise.
+    """
+    by_name = _channels_by_name(channels)
+    resolved = _resolve_channels(by_name, [d["Name"] for d in desired])
+    plan = []
+    if scope_tag:
+        listed = {d["Name"] for d in desired}
+        for c in resolved:
+            plan.append((c, {scope_tag} - set(_tag_names(c)), set()))
+        if replace:
+            for c in channels:
+                if c["Name"] not in listed and scope_tag in _tag_names(c):
+                    plan.append((c, set(), {scope_tag}))
+    else:
+        desired_by_name = {d["Name"]: set(d.get("Tags") or []) for d in desired}
+        for c in resolved:
+            want = desired_by_name.get(c["Name"], set())
+            current = set(_tag_names(c))
+            to_remove = (current - want) if replace else set()
+            plan.append((c, want - current, to_remove))
+    return plan
 
 
 @tags_app.command("import")
@@ -766,21 +800,14 @@ def tags_import(
 ):
     """Apply channel tags from a file, matching channels by name."""
     try:
-        desired = read_export(file, TAGS_TYPE)
+        desired, meta = read_export_meta(file, TAGS_TYPE)
     except (ValueError, KeyError, OSError) as e:
         typer.echo(f"Could not read tag file: {e}", err=True)
         raise typer.Exit(1)
+    scope_tag = meta.get("tag") if isinstance(meta, dict) and meta.get("scope") == "tag" else None
     with emby_session() as emby:
         channels = emby.livetv.channels_with_tags(_first_user_id(emby))
-        by_name = _channels_by_name(channels)
-        desired_by_name = {d["Name"]: set(d.get("Tags") or []) for d in desired}
-        resolved = _resolve_channels(by_name, [d["Name"] for d in desired])
-        plan = []
-        for c in resolved:
-            want = desired_by_name.get(c["Name"], set())
-            current = set(_tag_names(c))
-            to_remove = (current - want) if replace else set()
-            plan.append((c, want - current, to_remove))
+        plan = _tag_import_plan(channels, desired, scope_tag, replace)
         cb = (lambda: _snapshot_tags(emby, export_dir, channels)) if snapshot else None
         _apply_tag_changes(emby, plan, dry_run, yes, snapshot_cb=cb)
 

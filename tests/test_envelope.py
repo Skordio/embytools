@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from embytools.envelope import read_export, write_export
+from embytools.envelope import read_export, read_export_meta, write_export
 
 TYPE = "livetv-favorite-channels"
 
@@ -12,6 +12,18 @@ def test_round_trip(tmp_path):
     data = [{"Id": "1", "Name": "CNN"}]
     write_export(path, TYPE, "http://host", data)
     assert read_export(path, TYPE) == data
+
+
+def test_meta_round_trips_and_is_omitted_when_absent(tmp_path):
+    path = tmp_path / "m.json"
+    write_export(path, TYPE, "http://host", [], meta={"scope": "tag", "tag": "Fav"})
+    data, meta = read_export_meta(path, TYPE)
+    assert data == [] and meta == {"scope": "tag", "tag": "Fav"}
+
+    plain = tmp_path / "p.json"
+    write_export(plain, TYPE, "http://host", [])
+    assert "meta" not in json.loads(plain.read_text())  # byte-identical to before
+    assert read_export_meta(plain, TYPE) == ([], None)
 
 
 def test_envelope_shape(tmp_path):

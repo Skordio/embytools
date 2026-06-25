@@ -11,6 +11,10 @@ they were handed the right kind of data.
         "server": "http://192.168.1.214:8096",
         "data": [...]
     }
+
+An optional ``meta`` dict carries export-specific context (e.g. whether a tag
+export covers all tags or just one) so an importer can apply the right
+semantics. It is omitted when absent, keeping plain exports byte-identical.
 """
 
 import json
@@ -20,7 +24,7 @@ from pathlib import Path
 ENVELOPE_VERSION = 1
 
 
-def write_export(path: Path, type_: str, server: str, data) -> None:
+def write_export(path: Path, type_: str, server: str, data, meta: dict | None = None) -> None:
     payload = {
         "type": type_,
         "version": ENVELOPE_VERSION,
@@ -28,11 +32,13 @@ def write_export(path: Path, type_: str, server: str, data) -> None:
         "server": server,
         "data": data,
     }
+    if meta is not None:
+        payload["meta"] = meta
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
 
 
-def read_export(path: Path, expected_type: str):
+def _load(path: Path, expected_type: str) -> dict:
     payload = json.loads(path.read_text())
     if not isinstance(payload, dict):
         raise ValueError(f"{path} is not a valid export (expected a JSON object).")
@@ -43,4 +49,14 @@ def read_export(path: Path, expected_type: str):
         )
     if "data" not in payload:
         raise ValueError(f"{path} is missing its 'data' field.")
-    return payload["data"]
+    return payload
+
+
+def read_export(path: Path, expected_type: str):
+    return _load(path, expected_type)["data"]
+
+
+def read_export_meta(path: Path, expected_type: str):
+    """Like :func:`read_export`, but returns ``(data, meta)`` (meta may be None)."""
+    payload = _load(path, expected_type)
+    return payload["data"], payload.get("meta")

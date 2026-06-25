@@ -166,9 +166,11 @@ embytools channels tags set <channel> <tag>... [--dry-run] [--yes]
 ### channels tags export
 
 Export channel tags (name-keyed) to a file. Without `--tag`, every channel that
-has at least one tag is written with its full tag set. With `--tag X`, only
-channels carrying `X` are written (with just that tag) — handy for backing up a
-single tag's membership.
+has at least one tag is written with its full tag set. With `--tag X`, only the
+channels carrying `X` are written and the file is marked as a single-tag
+(membership) export — handy for backing up just one tag's membership. `import`
+reads that marker and syncs only that tag, so re-importing it never disturbs a
+channel's other tags (see `import` below).
 
 **Synopsis**
 
@@ -200,9 +202,15 @@ uv run embytools channels tags export snapshots/favorites-tag.json --tag Favorit
 
 ### channels tags import
 
-Apply channel tags from a file, matching channels by **name**. Additive by
-default (adds the file's tags, leaves others); `--replace` makes each channel's
-tags exactly match the file. Snapshots current tags first.
+Apply channel tags from a file, matching channels by **name**. Snapshots current
+tags first. The behavior depends on the file's scope:
+
+- A **full** export (no `--tag`): additive by default (adds the file's tags,
+  leaves others); `--replace` makes each channel's tags exactly match the file
+  (removing tags the file doesn't list).
+- A **single-tag** export (`--tag X`): adds `X` to the listed channels;
+  `--replace` additionally removes `X` from channels *not* listed (a membership
+  sync). Either way it only ever touches `X` — a channel's other tags are safe.
 
 **Synopsis**
 
@@ -218,7 +226,7 @@ embytools channels tags import <file> [--replace] [--no-snapshot] [--export-dir 
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--replace` | off | Make each channel's tags exactly match the file (removes tags not listed). |
+| `--replace` | off | Exact sync. For a full export, makes each channel's tags exactly match the file. For a single-tag export, also removes that tag from channels not listed. |
 | `--snapshot` / `--no-snapshot` | `--snapshot` | Back up current tags before applying. |
 | `--export-dir <dir>` | `snapshots` | Directory for the pre-import snapshot. |
 | `--dry-run` | off | Preview without writing. |
