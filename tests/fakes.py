@@ -17,16 +17,33 @@ class FakeFavorites:
 
 
 class FakeLiveTv:
-    def __init__(self, favorites_by_user=None):
+    def __init__(self, favorites_by_user=None, manage=None, fail_on_set=None):
         self.favorites_by_user = favorites_by_user or {}
+        self.manage = manage or []
+        self.fail_on_set = fail_on_set
+        self.set_calls = []
 
     def favorite_channels(self, user_id):
         return list(self.favorites_by_user.get(user_id, []))
+
+    def manage_channels(self, limit=5000):
+        return list(self.manage), len(self.manage)
+
+    def set_channel_number(self, user_id, item_id, number):
+        if item_id == self.fail_on_set:
+            raise RuntimeError("simulated failure")
+        self.set_calls.append((item_id, number))
+        for c in self.manage:
+            if c["Id"] == item_id:
+                c["ChannelNumber"] = number
 
 
 class FakeUsers:
     def __init__(self, users=None):
         self.users = users or []
+
+    def list(self):
+        return list(self.users)
 
     def find(self, name):
         for u in self.users:
@@ -54,8 +71,16 @@ class FakeSessions:
 class FakeEmby:
     base_url = "http://test"
 
-    def __init__(self, favorites_by_user=None, users=None, sessions=None, fail_on_add=None):
+    def __init__(
+        self,
+        favorites_by_user=None,
+        users=None,
+        sessions=None,
+        fail_on_add=None,
+        manage=None,
+        fail_on_set=None,
+    ):
         self.favorites = FakeFavorites(fail_on_add)
-        self.livetv = FakeLiveTv(favorites_by_user)
+        self.livetv = FakeLiveTv(favorites_by_user, manage, fail_on_set)
         self.users = FakeUsers(users)
         self.sessions = FakeSessions(sessions)

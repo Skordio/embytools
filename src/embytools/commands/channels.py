@@ -10,6 +10,7 @@ from ..session import emby_session
 channels_app = typer.Typer(help="Live TV channel commands.")
 
 EXPORT_TYPE = "livetv-favorite-channels"
+NUMBER_TYPE = "livetv-channel-numbers"
 
 
 def _slim(channels: list[dict]) -> list[dict]:
@@ -237,3 +238,223 @@ def channels_import(
     with emby_session() as emby:
         tgt = _resolve_user(emby, target)
         _apply_favorites(emby, tgt, items, dry_run, yes, replace=replace)
+
+
+# --- Channel numbering -------------------------------------------------------
+
+numbers_app = typer.Typer(help="Assign and back up Live TV channel numbers.")
+
+
+def _even_fill(names: list[str], lo: int, hi: int) -> list[tuple[str, str]]:
+    """Spread names across the band [lo, hi], maximizing even gaps.
+
+    Channel i gets number lo + i*step, where step packs the band as loosely as
+    it can while keeping every channel inside it. Numbers are returned as strings
+    (Emby's channel-number field is a string).
+    """
+    n = len(names)
+    if n == 0:
+        return []
+    capacity = hi - lo + 1
+    if n > capacity:
+        raise ValueError(
+            f"{n} channels can't fit in band {lo}-{hi} ({capacity} slots); widen the band."
+        )
+    step = max(1, capacity // n)
+    return [(name, str(lo + i * step)) for i, name in enumerate(names)]
+
+
+def _assign_numbers(
+    channels: list[dict],
+    favorite_names: set[str],
+    fav_band: tuple[int, int],
+    other_band: tuple[int, int],
+) -> list[dict]:
+    """Build an ordered, name-keyed numbering: favorites low, others high.
+
+    ``channels`` is the management list (already in sort-index / alphabetical
+    order); that order is preserved within each band.
+    """
+    fav_order = [c["Name"] for c in channels if c["Name"] in favorite_names]
+    other_order = [c["Name"] for c in channels if c["Name"] not in favorite_names]
+    assigned = _even_fill(fav_order, *fav_band) + _even_fill(other_order, *other_band)
+    return [{"Name": name, "Number": number} for name, number in assigned]
+
+
+def _first_user_id(emby) -> str:
+    """Any user id, used only as the context for fetching editable item DTOs."""
+    users = emby.users.list()
+    if not users:
+        typer.echo("No users found on the server.", err=True)
+        raise typer.Exit(1)
+    return users[0]["Id"]
+
+
+def _current_numbers(channels: list[dict]) -> list[dict]:
+    """Name-keyed list of channels that currently have a number."""
+    return [
+        {"Name": c["Name"], "Number": str(c["ChannelNumber"])}
+        for c in channels
+        if c.get("ChannelNumber")
+    ]
+
+
+def _snapshot_numbers(emby, export_dir: Path, channels: list[dict]) -> None:
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = export_dir / f"channel-numbers-{ts}.json"
+    data = _current_numbers(channels)
+    write_export(path, NUMBER_TYPE, emby.base_url, data)
+    typer.echo(f"Snapshotted {len(data)} channel number(s) -> {path}")
+
+
+def _write_numbers(emby, plan: list[tuple[dict, str]]) -> None:
+    """Apply (channel, number) pairs, reporting partial progress on failure."""
+    user_id = _first_user_id(emby)
+    done = 0
+    try:
+        for channel, number in plan:
+            emby.livetv.set_channel_number(user_id, channel["Id"], number)
+            done += 1
+    except Exception:
+        typer.echo(f"Aborted partway: changed {done}/{len(plan)} before the error.", err=True)
+        raise
+    typer.echo(f"Done. Set numbers on {done} channel(s).")
+
+
+def _apply_numbers(emby, desired: list[dict], dry_run: bool, yes: bool, snapshot: bool, export_dir: Path) -> None:
+    """Set channel numbers from a desired list, matching channels by name."""
+    channels, _ = emby.livetv.manage_channels()
+    by_name: dict[str, list[dict]] = {}
+    for c in channels:
+        by_name.setdefault(c["Name"], []).append(c)
+
+    plan: list[tuple[dict, str]] = []
+    missing: list[str] = []
+    ambiguous: list[str] = []
+    for entry in desired:
+        name, number = entry["Name"], str(entry["Number"])
+        matches = by_name.get(name, [])
+        if len(matches) == 1:
+            current = str(matches[0].get("ChannelNumber") or "")
+            if current != number:
+                plan.append((matches[0], number))
+        elif not matches:
+            missing.append(name)
+        else:
+            ambiguous.append(name)
+
+    typer.echo(
+        f"{len(desired)} entries; {len(plan)} channel(s) to change "
+        f"({len(missing)} missing, {len(ambiguous)} ambiguous by name)."
+    )
+    for channel, number in plan[:50]:
+        typer.echo(f"  {channel['Name']}: {channel.get('ChannelNumber') or '—'} -> {number}")
+    if len(plan) > 50:
+        typer.echo(f"  … and {len(plan) - 50} more")
+    for name in missing:
+        typer.echo(f"  missing (no channel named this): {name}", err=True)
+    for name in ambiguous:
+        typer.echo(f"  ambiguous (multiple channels, skipped): {name}", err=True)
+
+    if not plan:
+        typer.echo("Already in sync.")
+        return
+    if dry_run:
+        typer.echo("Dry run — no changes made.")
+        return
+    if snapshot:
+        _snapshot_numbers(emby, export_dir, channels)
+    if not yes:
+        typer.confirm(f"Set numbers on {len(plan)} channel(s)?", abort=True)
+    _write_numbers(emby, plan)
+
+
+@numbers_app.command("generate")
+def numbers_generate(
+    favorites_user: str = typer.Argument(..., help="User whose favorites get the low band."),
+    file: Path = typer.Argument(..., help="Destination JSON file."),
+    fav_start: int = typer.Option(1, "--fav-start", help="Favorites band start."),
+    fav_end: int = typer.Option(999, "--fav-end", help="Favorites band end."),
+    other_start: int = typer.Option(1000, "--other-start", help="Others band start."),
+    other_end: int = typer.Option(9999, "--other-end", help="Others band end."),
+):
+    """Generate a proposed channel numbering (favorites low, others high)."""
+    with emby_session() as emby:
+        u = _resolve_user(emby, favorites_user)
+        fav_names = {c["Name"] for c in emby.livetv.favorite_channels(u["Id"])}
+        channels, _ = emby.livetv.manage_channels()
+        try:
+            data = _assign_numbers(
+                channels, fav_names, (fav_start, fav_end), (other_start, other_end)
+            )
+        except ValueError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(1)
+        write_export(file, NUMBER_TYPE, emby.base_url, data)
+        favs = sum(1 for d in data if d["Name"] in fav_names)
+        typer.echo(f"Wrote numbering for {len(data)} channels ({favs} favorites) -> {file}")
+
+
+@numbers_app.command("export")
+def numbers_export(file: Path = typer.Argument(..., help="Destination JSON file.")):
+    """Back up current channel numbers (name-keyed) to a file."""
+    with emby_session() as emby:
+        channels, _ = emby.livetv.manage_channels()
+        data = _current_numbers(channels)
+        write_export(file, NUMBER_TYPE, emby.base_url, data)
+        typer.echo(f"Exported {len(data)} channel number(s) -> {file}")
+
+
+@numbers_app.command("apply")
+def numbers_apply(
+    file: Path = typer.Argument(..., help="Numbering JSON file (from generate or export)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    snapshot: bool = typer.Option(
+        True, "--snapshot/--no-snapshot", help="Back up current numbers first."
+    ),
+    export_dir: Path = typer.Option(
+        Path("snapshots"), "--export-dir", help="Directory for the pre-apply snapshot."
+    ),
+):
+    """Apply channel numbers from a file, matching channels by name."""
+    try:
+        desired = read_export(file, NUMBER_TYPE)
+    except (ValueError, KeyError, OSError) as e:
+        typer.echo(f"Could not read numbering file: {e}", err=True)
+        raise typer.Exit(1)
+    with emby_session() as emby:
+        _apply_numbers(emby, desired, dry_run, yes, snapshot, export_dir)
+
+
+@numbers_app.command("clear")
+def numbers_clear(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    snapshot: bool = typer.Option(
+        True, "--snapshot/--no-snapshot", help="Back up current numbers first."
+    ),
+    export_dir: Path = typer.Option(
+        Path("snapshots"), "--export-dir", help="Directory for the pre-clear snapshot."
+    ),
+):
+    """Clear the number on every channel that has one (sets empty string)."""
+    with emby_session() as emby:
+        channels, _ = emby.livetv.manage_channels()
+        numbered = [c for c in channels if c.get("ChannelNumber")]
+        typer.echo(f"{len(numbered)} channel(s) have a number to clear.")
+        for c in numbered[:50]:
+            typer.echo(f"  {c['Name']}: {c['ChannelNumber']} -> (cleared)")
+        if not numbered:
+            return
+        if dry_run:
+            typer.echo("Dry run — no changes made.")
+            return
+        if snapshot:
+            _snapshot_numbers(emby, export_dir, channels)
+        if not yes:
+            typer.confirm(f"Clear numbers on {len(numbered)} channel(s)?", abort=True)
+        _write_numbers(emby, [(c, "") for c in numbered])
+
+
+channels_app.add_typer(numbers_app, name="numbers")

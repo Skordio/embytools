@@ -115,6 +115,40 @@ uv run embytools channels copy Grace Steve --replace
 uv run embytools channels import Steve snapshots/Steve-favorite-channels-<timestamp>.json --replace
 ```
 
+### Channel numbering
+
+Assign Live TV channel **numbers** so clients that sort by number show your
+favorites first. Favorites (from a chosen user) get the low band (1–999),
+everything else the high band (1000+), each evenly spaced to leave gaps for
+later reordering.
+
+| Command | Description |
+| --- | --- |
+| `channels numbers generate <user> <file>` | Compute a proposed numbering and write it to a file (no server changes). Bands configurable via `--fav-start/--fav-end/--other-start/--other-end`. |
+| `channels numbers apply <file>` | Set channel numbers from a file, matching channels **by name**. Idempotent; `--dry-run`, confirmation, and a pre-apply snapshot (`--no-snapshot` to skip). |
+| `channels numbers export <file>` | Back up current channel numbers (name-keyed). |
+| `channels numbers clear` | Remove numbers from all numbered channels. |
+
+The workflow is **generate → review/edit the file → `apply --dry-run` → `apply`**.
+Numbers are matched and restored **by channel name**, not id — so if your M3U
+source changes domain (which regenerates channel ids and can wipe numbers),
+`channels numbers apply <backup>` re-applies them. Because of that wipe risk,
+back up regularly with `export` (or rely on the automatic pre-apply snapshot).
+
+```fish
+# Generate a numbering from Steve's favorites, review it, then apply
+uv run embytools channels numbers generate Steve numbers.json
+uv run embytools channels numbers apply numbers.json --dry-run
+uv run embytools channels numbers apply numbers.json
+
+# Back up, and restore after an upstream domain change wiped the numbers
+uv run embytools channels numbers export snapshots/numbers-backup.json
+uv run embytools channels numbers apply snapshots/numbers-backup.json
+```
+
+Whether channels actually display in number order is a per-client sort setting
+you control in Emby — this tool only assigns the numbers.
+
 ### Sessions & playback
 
 | Command | Description |

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import respx
 
@@ -84,3 +86,15 @@ def test_sessions_playstate_posts_command():
     with EmbyClient(BASE, "k") as e:
         e.sessions.playstate("sid", "Pause")
     assert route.called
+
+
+@respx.mock
+def test_set_channel_number_gets_then_posts_both_fields():
+    item = {"Id": "c1", "Name": "CNN", "Number": None, "ChannelNumber": None}
+    respx.get(f"{BASE}/Users/u/Items/c1").mock(return_value=httpx.Response(200, json=item))
+    post = respx.post(f"{BASE}/Items/c1").mock(return_value=httpx.Response(204))
+    with EmbyClient(BASE, "k") as e:
+        e.livetv.set_channel_number("u", "c1", "1500")
+    body = json.loads(post.calls.last.request.content)
+    assert body["Number"] == "1500"
+    assert body["ChannelNumber"] == "1500"

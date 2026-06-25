@@ -54,7 +54,9 @@ logic.
 Validated and built:
 
 - `users list`
-- `channels list / all / copy / export / import` — the first real tool. Copy
+- `channels list / all / copy / export / import` and `channels numbers
+  generate / apply / export / clear` (name-keyed channel numbering). The first
+  real tool. Copy
   proven valid: channel favorites are per-user user-data on a server-global
   item, so the same `ItemId` works for every user.
 - `sessions list / message / stop / pause / unpause` — active sessions and
