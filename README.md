@@ -184,6 +184,19 @@ file's Python, so only load schemes you trust.
 Whether channels actually display in number order is a per-client sort setting
 you control in Emby — this tool only assigns the numbers.
 
+### Channel tags
+
+Manage Live TV channel tags: `channels tags list` / `channels <tag>` / `show
+<channel>` to read, `add <tag> <channel>…` / `remove …` / `set <channel>
+<tag>…` to edit, and `export` / `import` (name-keyed) to back them up. Tags come
+from the M3U source, so a refresh can reset them — export so import can restore.
+See **[docs/commands/channels-tags.md](docs/commands/channels-tags.md)**.
+
+```fish
+uv run embytools channels tags list
+uv run embytools channels tags add Favorites "CNN USA" --dry-run
+```
+
 ### Sessions & playback
 
 | Command | Description |

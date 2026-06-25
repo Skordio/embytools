@@ -17,11 +17,16 @@ class FakeFavorites:
 
 
 class FakeLiveTv:
-    def __init__(self, favorites_by_user=None, manage=None, fail_on_set=None):
+    def __init__(
+        self, favorites_by_user=None, manage=None, fail_on_set=None, tagged=None, fail_on_tag=None
+    ):
         self.favorites_by_user = favorites_by_user or {}
         self.manage = manage or []
         self.fail_on_set = fail_on_set
         self.set_calls = []
+        self.tagged = tagged or []
+        self.fail_on_tag = fail_on_tag
+        self.tag_calls = []
 
     def favorite_channels(self, user_id):
         return list(self.favorites_by_user.get(user_id, []))
@@ -36,6 +41,31 @@ class FakeLiveTv:
         for c in self.manage:
             if c["Id"] == item_id:
                 c["ChannelNumber"] = number
+
+    # tags
+    def channels_with_tags(self, user_id, limit=5000):
+        return self.tagged
+
+    def channels_by_tag(self, user_id, tag):
+        return [c for c in self.tagged if tag in [t["Name"] for t in (c.get("TagItems") or [])]]
+
+    def add_tags(self, item_id, tags):
+        if item_id == self.fail_on_tag:
+            raise RuntimeError("simulated failure")
+        self.tag_calls.append(("add", item_id, list(tags)))
+        for c in self.tagged:
+            if c["Id"] == item_id:
+                names = {t["Name"] for t in (c.get("TagItems") or [])} | set(tags)
+                c["TagItems"] = [{"Name": n} for n in names]
+
+    def remove_tags(self, item_id, tags):
+        if item_id == self.fail_on_tag:
+            raise RuntimeError("simulated failure")
+        self.tag_calls.append(("remove", item_id, list(tags)))
+        for c in self.tagged:
+            if c["Id"] == item_id:
+                names = {t["Name"] for t in (c.get("TagItems") or [])} - set(tags)
+                c["TagItems"] = [{"Name": n} for n in names]
 
 
 class FakeUsers:
@@ -79,8 +109,10 @@ class FakeEmby:
         fail_on_add=None,
         manage=None,
         fail_on_set=None,
+        tagged=None,
+        fail_on_tag=None,
     ):
         self.favorites = FakeFavorites(fail_on_add)
-        self.livetv = FakeLiveTv(favorites_by_user, manage, fail_on_set)
+        self.livetv = FakeLiveTv(favorites_by_user, manage, fail_on_set, tagged, fail_on_tag)
         self.users = FakeUsers(users)
         self.sessions = FakeSessions(sessions)

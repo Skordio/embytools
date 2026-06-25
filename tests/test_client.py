@@ -89,6 +89,44 @@ def test_sessions_playstate_posts_command():
 
 
 @respx.mock
+def test_add_tags_posts_name_pairs():
+    route = respx.post(f"{BASE}/Items/c1/Tags/Add").mock(return_value=httpx.Response(204))
+    with EmbyClient(BASE, "k") as e:
+        e.livetv.add_tags("c1", ["News", "HD"])
+    assert json.loads(route.calls.last.request.content) == {
+        "Tags": [{"Name": "News"}, {"Name": "HD"}]
+    }
+
+
+@respx.mock
+def test_remove_tags_posts_to_delete():
+    route = respx.post(f"{BASE}/Items/c1/Tags/Delete").mock(return_value=httpx.Response(204))
+    with EmbyClient(BASE, "k") as e:
+        e.livetv.remove_tags("c1", ["X"])
+    assert route.called
+
+
+@respx.mock
+def test_channels_with_tags_requests_tags_field():
+    route = respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(200, json={"Items": []})
+    )
+    with EmbyClient(BASE, "k") as e:
+        e.livetv.channels_with_tags("u")
+    assert route.calls.last.request.url.params["Fields"] == "Tags"
+
+
+@respx.mock
+def test_channels_by_tag_filters_on_tag():
+    route = respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(200, json={"Items": []})
+    )
+    with EmbyClient(BASE, "k") as e:
+        e.livetv.channels_by_tag("u", "News")
+    assert route.calls.last.request.url.params["Tags"] == "News"
+
+
+@respx.mock
 def test_set_channel_number_gets_then_posts_both_fields():
     item = {"Id": "c1", "Name": "CNN", "Number": None, "ChannelNumber": None}
     respx.get(f"{BASE}/Users/u/Items/c1").mock(return_value=httpx.Response(200, json=item))

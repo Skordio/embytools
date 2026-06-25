@@ -481,3 +481,240 @@ def numbers_clear(
 
 
 channels_app.add_typer(numbers_app, name="numbers")
+
+
+# --- Channel tags -----------------------------------------------------------
+
+tags_app = typer.Typer(help="Manage Live TV channel tags.")
+
+TAGS_TYPE = "livetv-channel-tags"
+
+
+def _tag_names(channel: dict) -> list[str]:
+    """A channel's tag names, read from its TagItems."""
+    return [t["Name"] for t in (channel.get("TagItems") or [])]
+
+
+def _channels_by_name(channels: list[dict]) -> dict[str, list[dict]]:
+    by_name: dict[str, list[dict]] = {}
+    for c in channels:
+        by_name.setdefault(c["Name"], []).append(c)
+    return by_name
+
+
+def _resolve_channels(by_name: dict, names: list[str]) -> list[dict]:
+    """Resolve channel names to single channels, reporting missing/ambiguous."""
+    resolved = []
+    for name in names:
+        matches = by_name.get(name, [])
+        if len(matches) == 1:
+            resolved.append(matches[0])
+        elif not matches:
+            typer.echo(f"  missing (no channel named this): {name}", err=True)
+        else:
+            typer.echo(f"  ambiguous (multiple channels, skipped): {name}", err=True)
+    return resolved
+
+
+def _snapshot_tags(emby, export_dir: Path, channels: list[dict]) -> None:
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = export_dir / f"channel-tags-{ts}.json"
+    data = [{"Name": c["Name"], "Tags": _tag_names(c)} for c in channels if _tag_names(c)]
+    write_export(path, TAGS_TYPE, emby.base_url, data)
+    typer.echo(f"Snapshotted tags for {len(data)} channel(s) -> {path}")
+
+
+def _apply_tag_changes(emby, plan, dry_run: bool, yes: bool, snapshot_cb=None) -> None:
+    """plan: list of (channel, to_add:set, to_remove:set). Preview, confirm, apply."""
+    plan = [(c, add, rem) for (c, add, rem) in plan if add or rem]
+    total_add = sum(len(a) for _, a, _ in plan)
+    total_rem = sum(len(r) for _, _, r in plan)
+    typer.echo(f"{len(plan)} channel(s) to change: +{total_add} tag(s), -{total_rem} tag(s).")
+    for c, add, rem in plan[:50]:
+        bits = [f"+{t}" for t in sorted(add)] + [f"-{t}" for t in sorted(rem)]
+        typer.echo(f"  {c['Name']}: {' '.join(bits)}")
+    if len(plan) > 50:
+        typer.echo(f"  … and {len(plan) - 50} more")
+
+    if not plan:
+        typer.echo("Nothing to change.")
+        return
+    if dry_run:
+        typer.echo("Dry run — no changes made.")
+        return
+    if snapshot_cb:
+        snapshot_cb()
+    if not yes:
+        typer.confirm(f"Apply tag changes to {len(plan)} channel(s)?", abort=True)
+
+    done = 0
+    try:
+        for c, add, rem in plan:
+            if add:
+                emby.livetv.add_tags(c["Id"], sorted(add))
+            if rem:
+                emby.livetv.remove_tags(c["Id"], sorted(rem))
+            done += 1
+    except Exception:
+        typer.echo(f"Aborted partway: changed {done}/{len(plan)} before the error.", err=True)
+        raise
+    typer.echo(f"Done. Updated tags on {done} channel(s).")
+
+
+@tags_app.command("list")
+def tags_list(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")):
+    """List all channel tags and how many channels carry each."""
+    with emby_session() as emby:
+        channels = emby.livetv.channels_with_tags(_first_user_id(emby))
+        counts: dict[str, int] = {}
+        for c in channels:
+            for t in _tag_names(c):
+                counts[t] = counts.get(t, 0) + 1
+        rows = [{"Tag": t, "Channels": n} for t, n in sorted(counts.items())]
+        if not rows:
+            typer.echo("No tags." if not as_json else "[]")
+            return
+        if as_json:
+            print_json(rows)
+        else:
+            print_table(rows, [("Tag", 32), ("Channels", 0)])
+
+
+@tags_app.command("channels")
+def tags_channels(
+    tag: str = typer.Argument(..., help="Tag name."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+):
+    """List channels that have a given tag."""
+    with emby_session() as emby:
+        channels = emby.livetv.channels_by_tag(_first_user_id(emby), tag)
+        rows = [{"Name": c["Name"], "Id": c["Id"]} for c in channels]
+        if not rows:
+            typer.echo(f"No channels with tag {tag!r}." if not as_json else "[]")
+            return
+        if as_json:
+            print_json(rows)
+        else:
+            print_table(rows, [("Name", 34), ("Id", 0)])
+
+
+@tags_app.command("show")
+def tags_show(
+    channel: str = typer.Argument(..., help="Channel name."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+):
+    """Show a channel's tags."""
+    with emby_session() as emby:
+        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
+        resolved = _resolve_channels(by_name, [channel])
+        if not resolved:
+            raise typer.Exit(1)
+        tags = sorted(_tag_names(resolved[0]))
+        if as_json:
+            print_json(tags)
+        else:
+            typer.echo(", ".join(tags) if tags else "(no tags)")
+
+
+@tags_app.command("add")
+def tags_add(
+    tag: str = typer.Argument(..., help="Tag to add."),
+    channels: list[str] = typer.Argument(..., help="Channel name(s)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Add a tag to one or more channels."""
+    with emby_session() as emby:
+        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
+        resolved = _resolve_channels(by_name, channels)
+        plan = [(c, {tag} - set(_tag_names(c)), set()) for c in resolved]
+        _apply_tag_changes(emby, plan, dry_run, yes)
+
+
+@tags_app.command("remove")
+def tags_remove(
+    tag: str = typer.Argument(..., help="Tag to remove."),
+    channels: list[str] = typer.Argument(..., help="Channel name(s)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Remove a tag from one or more channels."""
+    with emby_session() as emby:
+        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
+        resolved = _resolve_channels(by_name, channels)
+        plan = [(c, set(), {tag} & set(_tag_names(c))) for c in resolved]
+        _apply_tag_changes(emby, plan, dry_run, yes)
+
+
+@tags_app.command("set")
+def tags_set(
+    channel: str = typer.Argument(..., help="Channel name."),
+    tags: list[str] = typer.Argument(..., help="The exact tag set for the channel."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Set a channel's tags exactly — adds missing and removes the rest."""
+    with emby_session() as emby:
+        by_name = _channels_by_name(emby.livetv.channels_with_tags(_first_user_id(emby)))
+        resolved = _resolve_channels(by_name, [channel])
+        if not resolved:
+            raise typer.Exit(1)
+        c = resolved[0]
+        desired, current = set(tags), set(_tag_names(c))
+        plan = [(c, desired - current, current - desired)]
+        _apply_tag_changes(emby, plan, dry_run, yes)
+
+
+@tags_app.command("export")
+def tags_export(
+    file: Path = typer.Argument(..., help="Destination JSON file."),
+    tag: str = typer.Option(None, "--tag", help="Only export channels having this tag."),
+):
+    """Export channel tags (name-keyed) to a file."""
+    with emby_session() as emby:
+        channels = emby.livetv.channels_with_tags(_first_user_id(emby))
+        if tag:
+            data = [{"Name": c["Name"], "Tags": [tag]} for c in channels if tag in _tag_names(c)]
+        else:
+            data = [{"Name": c["Name"], "Tags": _tag_names(c)} for c in channels if _tag_names(c)]
+        write_export(file, TAGS_TYPE, emby.base_url, data)
+        typer.echo(f"Exported tags for {len(data)} channel(s) -> {file}")
+
+
+@tags_app.command("import")
+def tags_import(
+    file: Path = typer.Argument(..., help="Tag export file."),
+    replace: bool = typer.Option(
+        False, "--replace", help="Make each channel's tags exactly match the file."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    snapshot: bool = typer.Option(
+        True, "--snapshot/--no-snapshot", help="Back up current tags first."
+    ),
+    export_dir: Path = typer.Option(
+        Path("snapshots"), "--export-dir", help="Directory for the pre-import snapshot."
+    ),
+):
+    """Apply channel tags from a file, matching channels by name."""
+    try:
+        desired = read_export(file, TAGS_TYPE)
+    except (ValueError, KeyError, OSError) as e:
+        typer.echo(f"Could not read tag file: {e}", err=True)
+        raise typer.Exit(1)
+    with emby_session() as emby:
+        channels = emby.livetv.channels_with_tags(_first_user_id(emby))
+        by_name = _channels_by_name(channels)
+        desired_by_name = {d["Name"]: set(d.get("Tags") or []) for d in desired}
+        resolved = _resolve_channels(by_name, [d["Name"] for d in desired])
+        plan = []
+        for c in resolved:
+            want = desired_by_name.get(c["Name"], set())
+            current = set(_tag_names(c))
+            to_remove = (current - want) if replace else set()
+            plan.append((c, want - current, to_remove))
+        cb = (lambda: _snapshot_tags(emby, export_dir, channels)) if snapshot else None
+        _apply_tag_changes(emby, plan, dry_run, yes, snapshot_cb=cb)
+
+
+channels_app.add_typer(tags_app, name="tags")

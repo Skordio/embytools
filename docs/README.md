@@ -10,6 +10,7 @@ server. For installation and a quickstart, see the [project README](../README.md
   - [users](commands/users.md)
   - [channels](commands/channels.md) — favorites: list, copy, export/import
   - [channels numbers](commands/channels-numbers.md) — channel numbering and schemes
+  - [channels tags](commands/channels-tags.md) — channel tags
   - [sessions](commands/sessions.md) — active sessions and playback control
 
 More sections (configuration, schemes & plugins, the snapshot/recovery model)

@@ -55,8 +55,10 @@ logic.
 Validated and built:
 
 - `users list`
-- `channels list / all / copy / export / import` and `channels numbers
-  schemes / generate / apply / export / clear` (name-keyed channel numbering).
+- `channels list / all / copy / export / import`, `channels numbers
+  schemes / generate / apply / export / clear` (name-keyed channel numbering),
+  and `channels tags list / channels / show / add / remove / set / export /
+  import` (channel tags).
   `generate` has no built-in schemes — it always loads a scheme function from a
   `--plugin` file (`numbering.py` is the registry/helpers; example plugins live
   in `schemes/`). The first real tool. Copy

@@ -185,3 +185,40 @@ def test_channels_numbers_apply_dry_run_cli(cli_env, tmp_path):
     assert res.exit_code == 0
     assert "1 channel(s) to change" in res.output
     assert "Dry run" in res.output
+
+
+@respx.mock
+def test_channels_tags_list_cli(cli_env):
+    respx.get(f"{BASE}/Users").mock(
+        return_value=httpx.Response(200, json=[{"Name": "Steve", "Id": "s"}])
+    )
+    respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {"Id": "1", "Name": "CNN", "TagItems": [{"Name": "News"}]},
+                    {"Id": "2", "Name": "ESPN", "TagItems": [{"Name": "Sports"}, {"Name": "News"}]},
+                ]
+            },
+        )
+    )
+    res = runner.invoke(app, ["channels", "tags", "list"])
+    assert res.exit_code == 0
+    assert "News" in res.output and "Sports" in res.output
+
+
+@respx.mock
+def test_channels_tags_add_dry_run_cli(cli_env):
+    respx.get(f"{BASE}/Users").mock(
+        return_value=httpx.Response(200, json=[{"Name": "Steve", "Id": "s"}])
+    )
+    respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(
+            200, json={"Items": [{"Id": "1", "Name": "CNN", "TagItems": []}]}
+        )
+    )
+    res = runner.invoke(app, ["channels", "tags", "add", "Fav", "CNN", "--dry-run"])
+    assert res.exit_code == 0
+    assert "+Fav" in res.output
+    assert "Dry run" in res.output

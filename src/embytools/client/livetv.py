@@ -48,3 +48,36 @@ class LiveTvAPI(Resource):
         item["Number"] = number
         item["ChannelNumber"] = number
         self.update_item(item)
+
+    # --- Tags ---
+    def channels_with_tags(self, user_id: str, limit: int = 5000) -> list[dict]:
+        """All channels with their tags (``TagItems``), one request."""
+        r = self._http.get(
+            "/LiveTv/Channels",
+            params={"UserId": user_id, "Fields": "Tags", "Limit": limit},
+        )
+        r.raise_for_status()
+        return r.json().get("Items", [])
+
+    def channels_by_tag(self, user_id: str, tag: str) -> list[dict]:
+        """Channels that carry ``tag``."""
+        r = self._http.get(
+            "/LiveTv/Channels",
+            params={"UserId": user_id, "Tags": tag, "Fields": "Tags"},
+        )
+        r.raise_for_status()
+        return r.json().get("Items", [])
+
+    def add_tags(self, item_id: str, tags: list[str]) -> None:
+        r = self._http.post(
+            f"/Items/{item_id}/Tags/Add",
+            json={"Tags": [{"Name": t} for t in tags]},
+        )
+        r.raise_for_status()
+
+    def remove_tags(self, item_id: str, tags: list[str]) -> None:
+        r = self._http.post(
+            f"/Items/{item_id}/Tags/Delete",
+            json={"Tags": [{"Name": t} for t in tags]},
+        )
+        r.raise_for_status()

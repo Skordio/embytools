@@ -15,6 +15,7 @@ Add `--help` to any command or group for its built-in usage.
 | [`users`](users.md) | `list` |
 | [`channels`](channels.md) | `list`, `all`, `copy`, `export`, `import` |
 | [`channels numbers`](channels-numbers.md) | `schemes`, `generate`, `apply`, `export`, `clear` |
+| [`channels tags`](channels-tags.md) | `list`, `channels`, `show`, `add`, `remove`, `set`, `export`, `import` |
 | [`sessions`](sessions.md) | `list`, `message`, `stop`, `pause`, `unpause` |
 
 ## Shared conventions
