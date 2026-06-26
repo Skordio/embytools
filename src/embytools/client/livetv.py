@@ -54,6 +54,21 @@ class LiveTvAPI(Resource):
         r = self._http.post(f"/Items/{item['Id']}", json=item)
         r.raise_for_status()
 
+    def set_channel_sort_index(self, item_id: str, management_id: str, new_index: int) -> None:
+        """Move a channel to ``new_index`` in the manual sort order.
+
+        Drives Emby's "Default Channel Order", which follows each channel's
+        SortIndexNumber rather than its channel number. Insert-and-shift
+        semantics: placing a channel at an index shifts the ones at/after it, so
+        writing the desired order front-to-back (0, 1, 2, …) lands every channel
+        correctly. ``management_id`` comes from the manage-channels entry.
+        """
+        r = self._http.post(
+            f"/LiveTv/Manage/Channels/{item_id}/SortIndex",
+            json={"Id": item_id, "ManagementId": management_id, "NewIndex": new_index},
+        )
+        r.raise_for_status()
+
     def set_channel_number(self, user_id: str, item_id: str, number: str) -> None:
         """Set (or clear) a channel's number via item metadata.
 

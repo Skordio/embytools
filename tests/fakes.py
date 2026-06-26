@@ -25,6 +25,7 @@ class FakeLiveTv:
         tagged=None,
         fail_on_tag=None,
         all_chans=None,
+        fail_on_sort=None,
     ):
         self.favorites_by_user = favorites_by_user or {}
         self.manage = manage or []
@@ -34,6 +35,8 @@ class FakeLiveTv:
         self.fail_on_tag = fail_on_tag
         self.tag_calls = []
         self.all_chans = all_chans or []
+        self.fail_on_sort = fail_on_sort
+        self.sort_calls = []
 
     def favorite_channels(self, user_id):
         return list(self.favorites_by_user.get(user_id, []))
@@ -51,6 +54,11 @@ class FakeLiveTv:
         for c in self.manage:
             if c["Id"] == item_id:
                 c["ChannelNumber"] = number
+
+    def set_channel_sort_index(self, item_id, management_id, new_index):
+        if item_id == self.fail_on_sort:
+            raise RuntimeError("simulated failure")
+        self.sort_calls.append((item_id, management_id, new_index))
 
     # tags
     def channels_with_tags(self, user_id, limit=5000):
@@ -122,10 +130,11 @@ class FakeEmby:
         tagged=None,
         fail_on_tag=None,
         all_chans=None,
+        fail_on_sort=None,
     ):
         self.favorites = FakeFavorites(fail_on_add)
         self.livetv = FakeLiveTv(
-            favorites_by_user, manage, fail_on_set, tagged, fail_on_tag, all_chans
+            favorites_by_user, manage, fail_on_set, tagged, fail_on_tag, all_chans, fail_on_sort
         )
         self.users = FakeUsers(users)
         self.sessions = FakeSessions(sessions)

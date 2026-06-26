@@ -3,3 +3,5 @@ config.toml
 __pycache__/
 *.egg-info/
 snapshots/
+
+Emby.SDK/

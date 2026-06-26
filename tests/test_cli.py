@@ -265,6 +265,71 @@ def test_channels_numbers_apply_dry_run_cli(cli_env, tmp_path):
     assert "Dry run" in res.output
 
 
+def _manage_for_sort():
+    # Returned by the manage endpoint; manage_channels() re-sorts these by
+    # SortIndexNumber, so the live order is B, C, A while number order is A, B, C.
+    return {
+        "Items": [
+            {"Id": "a", "Name": "A", "ChannelNumber": "1", "SortIndexNumber": 2, "ManagementId": "ma"},
+            {"Id": "b", "Name": "B", "ChannelNumber": "2", "SortIndexNumber": 0, "ManagementId": "mb"},
+            {"Id": "c", "Name": "C", "ChannelNumber": "3", "SortIndexNumber": 1, "ManagementId": "mc"},
+        ],
+        "TotalRecordCount": 3,
+    }
+
+
+@respx.mock
+def test_channels_numbers_sort_cli(cli_env):
+    respx.get(f"{BASE}/LiveTv/Manage/Channels").mock(
+        return_value=httpx.Response(200, json=_manage_for_sort())
+    )
+    post = respx.post(url__regex=rf"{BASE}/LiveTv/Manage/Channels/[^/]+/SortIndex").mock(
+        return_value=httpx.Response(204)
+    )
+    res = runner.invoke(app, ["channels", "numbers", "sort", "-y"])
+    assert res.exit_code == 0, res.output
+    posted = [json.loads(c.request.content) for c in post.calls]
+    assert [(p["Id"], p["NewIndex"]) for p in posted] == [("a", 0), ("b", 1), ("c", 2)]
+
+
+@respx.mock
+def test_channels_numbers_sort_dry_run_writes_nothing(cli_env):
+    respx.get(f"{BASE}/LiveTv/Manage/Channels").mock(
+        return_value=httpx.Response(200, json=_manage_for_sort())
+    )
+    post = respx.post(url__regex=rf"{BASE}/LiveTv/Manage/Channels/[^/]+/SortIndex").mock(
+        return_value=httpx.Response(204)
+    )
+    res = runner.invoke(app, ["channels", "numbers", "sort", "--dry-run"])
+    assert res.exit_code == 0
+    assert "3 to reorder" in res.output and "Dry run" in res.output
+    assert not post.called
+
+
+@respx.mock
+def test_channels_numbers_sort_idempotent(cli_env):
+    # Already in number order (SortIndexNumber matches) -> nothing to write.
+    respx.get(f"{BASE}/LiveTv/Manage/Channels").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {"Id": "a", "Name": "A", "ChannelNumber": "1", "SortIndexNumber": 0, "ManagementId": "ma"},
+                    {"Id": "b", "Name": "B", "ChannelNumber": "2", "SortIndexNumber": 1, "ManagementId": "mb"},
+                ],
+                "TotalRecordCount": 2,
+            },
+        )
+    )
+    post = respx.post(url__regex=rf"{BASE}/LiveTv/Manage/Channels/[^/]+/SortIndex").mock(
+        return_value=httpx.Response(204)
+    )
+    res = runner.invoke(app, ["channels", "numbers", "sort", "-y"])
+    assert res.exit_code == 0
+    assert "Already sorted" in res.output
+    assert not post.called
+
+
 @respx.mock
 def test_channels_tags_list_cli(cli_env):
     respx.get(f"{BASE}/Users").mock(

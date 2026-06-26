@@ -148,3 +148,14 @@ def test_set_channel_number_gets_then_posts_both_fields():
     body = json.loads(post.calls.last.request.content)
     assert body["Number"] == "1500"
     assert body["ChannelNumber"] == "1500"
+
+
+@respx.mock
+def test_set_channel_sort_index_posts_body():
+    post = respx.post(f"{BASE}/LiveTv/Manage/Channels/c1/SortIndex").mock(
+        return_value=httpx.Response(204)
+    )
+    with EmbyClient(BASE, "k") as e:
+        e.livetv.set_channel_sort_index("c1", "mgmt-1", 7)
+    body = json.loads(post.calls.last.request.content)
+    assert body == {"Id": "c1", "ManagementId": "mgmt-1", "NewIndex": 7}

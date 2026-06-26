@@ -606,6 +606,72 @@ def numbers_clear(
         _write_numbers(emby, [(c, "") for c in numbered])
 
 
+def _channel_number_key(channel: dict):
+    """Sort key ordering channels by numeric channel number; unnumbered last."""
+    try:
+        return (0, float(channel.get("ChannelNumber")), channel["Name"])
+    except (TypeError, ValueError):
+        return (1, float("inf"), channel["Name"])
+
+
+def _write_sort_order(emby, desired: list[dict], start: int) -> None:
+    """Reorder ``desired[start:]`` to indices start, start+1, … reporting progress.
+
+    Only the suffix from the first out-of-place channel needs writing: the
+    channels before ``start`` are already correctly placed, and (insert-and-shift)
+    writing front-to-back never disturbs the prefix.
+    """
+    done = 0
+    total = len(desired) - start
+    try:
+        for i in range(start, len(desired)):
+            c = desired[i]
+            emby.livetv.set_channel_sort_index(c["Id"], c["ManagementId"], i)
+            done += 1
+    except Exception:
+        typer.echo(f"Aborted partway: reordered {done}/{total} before the error.", err=True)
+        raise
+    typer.echo(f"Done. Reordered {done} channel(s) to match channel-number order.")
+
+
+@numbers_app.command("sort")
+def numbers_sort(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+):
+    """Set every channel's sort index to match channel-number order.
+
+    Emby's "Default Channel Order" follows each channel's manual sort index, not
+    its channel number — so after numbering you also need this to make the list
+    read in number order. Idempotent: only the channels out of place are moved.
+    """
+    with emby_session() as emby:
+        channels = _managed_channels(emby)
+        desired = sorted(channels, key=_channel_number_key)
+        current = sorted(channels, key=lambda c: c.get("SortIndexNumber") or 0)
+        # First position where the live order diverges from the desired order;
+        # everything before it is already correctly placed.
+        start = next(
+            (i for i, (a, b) in enumerate(zip(current, desired)) if a["Id"] != b["Id"]),
+            len(desired),
+        )
+        to_move = len(desired) - start
+
+        typer.echo(f"{len(desired)} channel(s); {to_move} to reorder. Target order starts:")
+        for i, c in enumerate(desired[:10]):
+            typer.echo(f"  {i:>4}  {c.get('ChannelNumber') or '—':>6}  {c['Name']}")
+
+        if not to_move:
+            typer.echo("Already sorted by channel number.")
+            return
+        if dry_run:
+            typer.echo("Dry run — no changes made.")
+            return
+        if not yes:
+            typer.confirm(f"Reorder {to_move} channel(s)?", abort=True)
+        _write_sort_order(emby, desired, start)
+
+
 channels_app.add_typer(numbers_app, name="numbers")
 
 

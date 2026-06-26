@@ -8,8 +8,9 @@ channels by **name** so it survives id regeneration.
 See the [shared conventions](README.md#shared-conventions) for write safety,
 name-keyed matching, and snapshots.
 
-> Whether channels actually display in number order is a per-client sort setting
-> you control in Emby — these commands only assign the numbers.
+> Assigning numbers doesn't reorder the list by itself: Emby's default channel
+> order follows each channel's sort index, and clients may have their own sort
+> setting. Use `channels numbers sort` to push the sort index into number order.
 
 ## Workflow
 
@@ -159,6 +160,45 @@ uv run embytools channels numbers apply numbers.json
 - Names in the file that match no current channel, or match more than one, are
   reported and skipped.
 - If a write fails partway, the command reports how many changed before the error.
+
+---
+
+### channels numbers sort
+
+Set every channel's **manual sort index** to match channel-number order. Emby's
+"Default Channel Order" follows each channel's sort index (`SortIndexNumber`),
+**not** its channel number — so after `apply` you also need `sort` for the list
+to actually read in number order on clients using the default sort.
+
+**Synopsis**
+
+```
+embytools channels numbers sort [--dry-run] [--yes]
+```
+
+**Options**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--dry-run` | off | Preview without writing. |
+| `--yes`, `-y` | off | Skip the confirmation prompt. |
+
+**Examples**
+
+```fish
+uv run embytools channels numbers apply numbers.json
+uv run embytools channels numbers sort --dry-run
+uv run embytools channels numbers sort
+```
+
+**Notes**
+
+- Derives the order from the channels' **current** numbers — run it after
+  `apply`. Channels without a number sort last (by name).
+- Idempotent: only channels out of place are moved (0 writes when already
+  sorted). It writes via `POST /LiveTv/Manage/Channels/{Id}/SortIndex`, whose
+  insert-and-shift behavior means a full re-sort is one write per channel.
+- If a write fails partway, the command reports how many were reordered first.
 
 ---
 

@@ -59,7 +59,7 @@ Validated and built:
 
 - `users list`
 - `channels list / all / copy / export / import`, `channels numbers
-  schemes / generate / apply / export / clear` (name-keyed channel numbering),
+  schemes / generate / apply / sort / export / clear` (name-keyed channel numbering),
   and `channels tags list / channels / show / add / remove / set / schemes /
   generate / export / import` (channel tags).
   `generate` (both numbering and tags) has no built-in schemes — it always loads

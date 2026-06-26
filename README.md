@@ -144,14 +144,18 @@ always requires a plugin. Example schemes:
 | `channels numbers schemes --plugin file.py` | List the schemes a plugin provides. |
 | `channels numbers generate <scheme> <file> --plugin file.py` | Run a scheme from a plugin and write the numbering to a file (no server changes). Pass scheme options with `--opt key=value`. `--plugin` is required. |
 | `channels numbers apply <file>` | Set channel numbers from a file, matching channels **by name**. Idempotent; `--dry-run`, confirmation, and a pre-apply snapshot (`--no-snapshot` to skip). |
+| `channels numbers sort` | Set every channel's sort index to channel-number order, so Emby's default channel order reads in number order. Idempotent; `--dry-run`. |
 | `channels numbers export <file>` | Back up current channel numbers (name-keyed). |
 | `channels numbers clear` | Remove numbers from all numbered channels. |
 
-The workflow is **generate → review/edit the file → `apply --dry-run` → `apply`**.
-Numbers are matched and restored **by channel name**, not id — so if your M3U
-source changes domain (which regenerates channel ids and can wipe numbers),
-`channels numbers apply <backup>` re-applies them. Because of that wipe risk,
-back up regularly with `export` (or rely on the automatic pre-apply snapshot).
+The workflow is **generate → review/edit the file → `apply --dry-run` → `apply`
+→ `sort`**. Numbers are matched and restored **by channel name**, not id — so if
+your M3U source changes domain (which regenerates channel ids and can wipe
+numbers), `channels numbers apply <backup>` re-applies them. Because of that wipe
+risk, back up regularly with `export` (or rely on the automatic pre-apply
+snapshot). Assigning numbers doesn't reorder the list on its own — Emby's default
+channel order follows each channel's **sort index**; `channels numbers sort`
+pushes that into number order.
 
 ```fish
 # Generate with the favorites-bands plugin, review, then apply
@@ -189,8 +193,8 @@ and `ctx.int_opt(key, default)`. See `schemes/favorites_bands.py` and
 `snapshots/categorize.py` for the shipped examples. Note `--plugin` executes the
 file's Python, so only load schemes you trust.
 
-Whether channels actually display in number order is a per-client sort setting
-you control in Emby — this tool only assigns the numbers.
+`channels numbers sort` sets the server-side default channel order to match the
+numbers; individual clients may still apply their own sort setting.
 
 ### Channel tags
 

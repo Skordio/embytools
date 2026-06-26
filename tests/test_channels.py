@@ -5,6 +5,7 @@ from fakes import FakeEmby
 from embytools.commands.channels import (
     EXPORT_TYPE,
     _apply_favorites,
+    _channel_number_key,
     _first_user_id,
     _guarded_export,
     _resolve_user,
@@ -13,6 +14,7 @@ from embytools.commands.channels import (
     _snapshot_favorites,
     _snapshot_numbers,
     _validate_items,
+    _write_sort_order,
 )
 from embytools.envelope import read_export, write_export
 
@@ -308,4 +310,36 @@ def test_partial_failure_reports_progress_and_raises(capsys):
             existing_channels=[],
         )
     assert emby.favorites.added == [("u", "1")]  # first succeeded, aborted on second
+    assert "Aborted partway" in capsys.readouterr().err
+
+
+# --- channel sort order ------------------------------------------------------
+
+
+def test_channel_number_key_orders_numerically_unnumbered_last():
+    chans = [
+        {"Name": "B", "ChannelNumber": "100"},
+        {"Name": "A", "ChannelNumber": "20"},
+        {"Name": "Z", "ChannelNumber": None},  # unnumbered sorts last
+    ]
+    assert [c["Name"] for c in sorted(chans, key=_channel_number_key)] == ["A", "B", "Z"]
+
+
+def _mc(id_, name, mgmt):
+    return {"Id": id_, "Name": name, "ManagementId": mgmt}
+
+
+def test_write_sort_order_writes_only_the_suffix_with_indices():
+    emby = FakeEmby()
+    desired = [_mc("a", "A", "ma"), _mc("b", "B", "mb"), _mc("c", "C", "mc")]
+    _write_sort_order(emby, desired, 1)  # prefix [a] already in place
+    assert emby.livetv.sort_calls == [("b", "mb", 1), ("c", "mc", 2)]
+
+
+def test_write_sort_order_reports_partial_failure(capsys):
+    emby = FakeEmby(fail_on_sort="b")
+    desired = [_mc("a", "A", "ma"), _mc("b", "B", "mb"), _mc("c", "C", "mc")]
+    with pytest.raises(RuntimeError):
+        _write_sort_order(emby, desired, 0)
+    assert emby.livetv.sort_calls == [("a", "ma", 0)]  # aborted on b
     assert "Aborted partway" in capsys.readouterr().err
