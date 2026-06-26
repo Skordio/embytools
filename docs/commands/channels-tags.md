@@ -247,3 +247,83 @@ uv run embytools channels tags import snapshots/channel-tags.json
 
 - Because matching is by name, a backup keeps working even after the upstream
   source regenerates channel ids.
+
+---
+
+### channels tags schemes
+
+List the **tag schemes** a plugin provides. A tag scheme is the tag-side analog
+of a numbering scheme: a function that maps the current channel list to a desired
+tag set. Schemes only come from `--plugin` files — there are no built-ins.
+
+**Synopsis**
+
+```
+embytools channels tags schemes [--plugin <file.py>]...
+```
+
+**Options**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--plugin <file.py>` | none | Load tag scheme(s) from a `.py` file (repeatable). |
+
+---
+
+### channels tags generate
+
+Run a tag scheme from a `--plugin` file and write its result to a **full**
+`livetv-channel-tags` file (no server changes). Apply it with
+`channels tags import --replace`, which makes each channel's tags exactly match
+the file — so a scheme can both add tags and strip unwanted ones (e.g. the
+source's `A`–`Z` letter-index tags) in one pass.
+
+**Synopsis**
+
+```
+embytools channels tags generate <scheme> <file> [--opt key=value]... --plugin <file.py>...
+```
+
+**Arguments**
+
+- `scheme` (required) — the tag scheme name (see `channels tags schemes`).
+- `file` (required) — destination JSON path.
+
+**Options**
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--opt key=value` | none | Scheme option, repeatable (e.g. `--opt user=Steve`). |
+| `--plugin <file.py>` | none (required) | Load scheme(s) from a `.py` file (repeatable). |
+
+**Writing a tag scheme**
+
+A tag scheme takes a `SchemeContext` (the same one numbering schemes get —
+`ctx.channels` carry their `TagItems`, plus `ctx.options` and
+`ctx.favorite_names(user)`) and returns
+`list[{"Name": str, "Tags": list[str]}]`. Register it with `@tag_scheme("name")`:
+
+```python
+# my_tags.py
+from embytools.livetv import tag_scheme
+
+@tag_scheme("drop-letters")
+def drop_letters(ctx):
+    out = []
+    for c in ctx.channels:
+        tags = [t["Name"] for t in (c.get("TagItems") or [])]
+        out.append({"Name": c["Name"], "Tags": [t for t in tags if len(t) > 1]})
+    return out
+```
+
+**Examples**
+
+```fish
+uv run embytools channels tags generate drop-letters /tmp/tags.json --plugin my_tags.py
+uv run embytools channels tags import /tmp/tags.json --replace --dry-run
+uv run embytools channels tags import /tmp/tags.json --replace
+```
+
+The workflow is **generate → review the file → `import --replace --dry-run` →
+`import --replace`** — the same shape as `channels numbers`. `--plugin` executes
+the file's Python, so only load schemes you trust.

@@ -92,9 +92,10 @@ Write commands (`copy`, `import`) share safety conventions:
 
 `channels copy` also accepts `--export` to snapshot **both** users' favorites
 before copying — the source's, and the target's pre-copy state. Files are
-auto-named (`<user>-favorite-channels-<timestamp>.json`) into `snapshots/` by
-default, or wherever `--export-dir <dir>` points. The target snapshot is your
-safety net: it's an exact record of what the target had before the copy.
+auto-named (`<user>-favorite-channels-<timestamp>.json`) into `snapshots/favorites/`
+by default (a per-type subdirectory of `--export-dir`, which defaults to
+`snapshots`). The target snapshot is your safety net: it's an exact record of
+what the target had before the copy.
 
 By default `copy` and `import` are **additive** — they add favorites and never
 remove any, which is safe for merging one user's channels into another's. Pass
@@ -121,7 +122,7 @@ uv run embytools channels copy Grace Steve --export
 uv run embytools channels copy Grace Steve --replace
 
 # Undo a copy by restoring Steve's pre-copy snapshot exactly
-uv run embytools channels import Steve snapshots/Steve-favorite-channels-<timestamp>.json --replace
+uv run embytools channels import Steve snapshots/favorites/Steve-favorite-channels-<timestamp>.json --replace
 ```
 
 ### Channel numbering
@@ -195,8 +196,12 @@ you control in Emby — this tool only assigns the numbers.
 
 Manage Live TV channel tags: `channels tags list` / `channels <tag>` / `show
 <channel>` to read, `add <tag> <channel>…` / `remove …` / `set <channel>
-<tag>…` to edit, and `export` / `import` (name-keyed) to back them up. Tags come
-from the M3U source, so a refresh can reset them — export so import can restore.
+<tag>…` to edit, and `export` / `import` (name-keyed) to back them up. For bulk
+organization, `tags generate <scheme> <file> --plugin …` runs a pluggable tag
+scheme (the tag-side analog of a numbering scheme) and `tags import --replace`
+applies it, so a scheme can add tags and strip unwanted ones (e.g. the source's
+letter-index tags) in one pass. Tags come from the M3U source, so a refresh can
+reset them — export (or a scheme) so import can restore.
 See **[docs/commands/channels-tags.md](docs/commands/channels-tags.md)**.
 
 ```fish

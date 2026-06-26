@@ -4,7 +4,14 @@ from pathlib import Path
 import typer
 
 from ..envelope import read_export, read_export_meta, write_export
-from ..numbering import SCHEMES, SchemeContext, get_scheme, load_plugin
+from ..livetv import (
+    SCHEMES,
+    TAG_SCHEMES,
+    SchemeContext,
+    get_scheme,
+    get_tag_scheme,
+    load_plugin,
+)
 from ..output import print_json, print_table
 from ..session import emby_session
 
@@ -65,10 +72,10 @@ def _guarded_export(file: Path, type_: str, server: str, data, label: str, allow
 
 
 def _snapshot_favorites(emby, export_dir: Path, users: list[tuple[dict, list[dict]]]) -> None:
-    """Write a timestamped favorites snapshot per user into export_dir."""
+    """Write a timestamped favorites snapshot per user into export_dir/favorites."""
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     for user, favorites in users:
-        path = export_dir / f"{_safe_filename(user['Name'])}-favorite-channels-{ts}.json"
+        path = export_dir / "favorites" / f"{_safe_filename(user['Name'])}-favorite-channels-{ts}.json"
         write_export(path, EXPORT_TYPE, emby.base_url, favorites)
         typer.echo(f"Snapshotted {len(favorites)} channel(s) for {user['Name']} -> {path}")
 
@@ -381,7 +388,7 @@ def _current_numbers(channels: list[dict]) -> list[dict]:
 
 def _snapshot_numbers(emby, export_dir: Path, channels: list[dict]) -> None:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = export_dir / f"channel-numbers-{ts}.json"
+    path = export_dir / "numbers" / f"channel-numbers-{ts}.json"
     data = _current_numbers(channels)
     write_export(path, NUMBER_TYPE, emby.base_url, data)
     typer.echo(f"Snapshotted {len(data)} channel number(s) -> {path}")
@@ -638,7 +645,7 @@ def _resolve_channels(channels: list[dict], names: list[str]) -> list[dict]:
 
 def _snapshot_tags(emby, export_dir: Path, channels: list[dict]) -> None:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = export_dir / f"channel-tags-{ts}.json"
+    path = export_dir / "tags" / f"channel-tags-{ts}.json"
     data = [{"Name": c["Name"], "Tags": _tag_names(c)} for c in channels if _tag_names(c)]
     write_export(path, TAGS_TYPE, emby.base_url, data)
     typer.echo(f"Snapshotted tags for {len(data)} channel(s) -> {path}")
@@ -877,6 +884,79 @@ def tags_import(
         plan = _tag_import_plan(channels, resolved, desired, scope_tag, replace)
         cb = (lambda: _snapshot_tags(emby, export_dir, channels)) if snapshot else None
         _apply_tag_changes(emby, plan, dry_run, yes, snapshot_cb=cb)
+
+
+@tags_app.command("schemes")
+def tags_schemes(
+    plugin: list[Path] = typer.Option(
+        None, "--plugin", help="Load tag scheme(s) from a .py file (repeatable)."
+    ),
+):
+    """List available tag schemes."""
+    _load_plugins(plugin)
+    if not TAG_SCHEMES:
+        typer.echo("No tag schemes registered.")
+        return
+    for name in sorted(TAG_SCHEMES):
+        doc = (TAG_SCHEMES[name].__doc__ or "").strip().splitlines()
+        summary = doc[0] if doc else ""
+        typer.echo(f"{name:<18} {summary}")
+
+
+@tags_app.command("generate")
+def tags_generate(
+    scheme_name: str = typer.Argument(..., help="Tag scheme name (see `channels tags schemes`)."),
+    file: Path = typer.Argument(..., help="Destination JSON file."),
+    opt: list[str] = typer.Option(
+        None, "--opt", help="Scheme option as key=value (repeatable), e.g. --opt user=Steve."
+    ),
+    plugin: list[Path] = typer.Option(
+        None, "--plugin", help="Load tag scheme(s) from a .py file (repeatable)."
+    ),
+):
+    """Generate a desired channel-tag set using a scheme from a --plugin file.
+
+    Writes a full ``livetv-channel-tags`` file; apply it with
+    ``channels tags import --replace`` to make each channel's tags exactly match.
+    """
+    if not plugin:
+        typer.echo(
+            "generate requires at least one --plugin <file.py> providing the tag scheme. "
+            "See `channels tags schemes --plugin ...`.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    _load_plugins(plugin)
+    try:
+        fn = get_tag_scheme(scheme_name)
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    options = _parse_opts(opt)
+    with emby_session() as emby:
+        channels = emby.livetv.channels_with_tags(_first_user_id(emby))
+        ctx = SchemeContext(emby=emby, channels=channels, options=options)
+        try:
+            data = fn(ctx)
+        except (ValueError, KeyError) as e:
+            typer.echo(f"Tag scheme {scheme_name!r} failed: {e}", err=True)
+            raise typer.Exit(1)
+        if not isinstance(data, list) or not all(
+            isinstance(d, dict)
+            and "Name" in d
+            and isinstance(d.get("Tags"), list)
+            and all(isinstance(t, str) for t in d["Tags"])
+            for d in data
+        ):
+            typer.echo(
+                f"Tag scheme {scheme_name!r} must return a list of "
+                "{'Name': str, 'Tags': list[str]} dicts.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        data = [{"Name": d["Name"], "Tags": list(d["Tags"])} for d in data]
+        write_export(file, TAGS_TYPE, emby.base_url, data)
+        typer.echo(f"Wrote desired tags for {len(data)} channel(s) -> {file}")
 
 
 channels_app.add_typer(tags_app, name="tags")

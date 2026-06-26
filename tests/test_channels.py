@@ -10,6 +10,8 @@ from embytools.commands.channels import (
     _resolve_user,
     _safe_filename,
     _slim,
+    _snapshot_favorites,
+    _snapshot_numbers,
     _validate_items,
 )
 from embytools.envelope import read_export, write_export
@@ -67,6 +69,21 @@ def test_guarded_export_writes_non_empty(tmp_path):
     f = tmp_path / "b.json"
     _guarded_export(f, EXPORT_TYPE, "http://h", [{"Name": "CNN"}], "favorites", allow_empty=False)
     assert read_export(f, EXPORT_TYPE) == [{"Name": "CNN"}]
+
+
+def test_snapshot_favorites_lands_in_favorites_subdir(tmp_path):
+    emby = FakeEmby()
+    _snapshot_favorites(emby, tmp_path, [({"Name": "Steve", "Id": "u"}, [ch("1", "CNN")])])
+    files = list((tmp_path / "favorites").glob("*.json"))
+    assert len(files) == 1 and "favorite-channels" in files[0].name
+    assert not list(tmp_path.glob("*.json"))  # nothing dumped at the root
+
+
+def test_snapshot_numbers_lands_in_numbers_subdir(tmp_path):
+    emby = FakeEmby()
+    _snapshot_numbers(emby, tmp_path, [{"Name": "CNN", "ChannelNumber": "5"}])
+    files = list((tmp_path / "numbers").glob("*.json"))
+    assert len(files) == 1 and files[0].name.startswith("channel-numbers-")
 
 
 def test_slim_keeps_only_id_and_name():

@@ -12,7 +12,10 @@ src/embytools/
 ├── output.py             # print_json / print_table (human table vs --json)
 ├── errors.py             # friendly_errors — HTTP/connection failures → clean messages
 ├── envelope.py           # self-describing JSON export/import wrapper
-├── numbering.py          # pluggable channel-numbering schemes (registry + helpers)
+├── numbering.py          # back-compat shim → embytools.livetv.numbering
+├── livetv/               # Live TV-only logic (numbering + tagging schemes)
+│   ├── numbering.py      #   pluggable channel-numbering schemes (registry + helpers)
+│   └── tagging.py        #   pluggable channel-tagging schemes (registry; reuses SchemeContext)
 ├── client/               # the Emby API, split into resource namespaces
 │   ├── core.py           #   EmbyClient — holds one httpx client + namespaces
 │   ├── _resource.py      #   Resource base
@@ -57,11 +60,13 @@ Validated and built:
 - `users list`
 - `channels list / all / copy / export / import`, `channels numbers
   schemes / generate / apply / export / clear` (name-keyed channel numbering),
-  and `channels tags list / channels / show / add / remove / set / export /
-  import` (channel tags).
-  `generate` has no built-in schemes — it always loads a scheme function from a
-  `--plugin` file (`numbering.py` is the registry/helpers; example plugins live
-  in `schemes/`). The first real tool. Copy
+  and `channels tags list / channels / show / add / remove / set / schemes /
+  generate / export / import` (channel tags).
+  `generate` (both numbering and tags) has no built-in schemes — it always loads
+  a scheme function from a `--plugin` file. `livetv/numbering.py` and
+  `livetv/tagging.py` are the registries/helpers (a tag scheme reuses the
+  numbering `SchemeContext`); example plugins live in `schemes/`. The first real
+  tool. Copy
   proven valid: channel favorites are per-user user-data on a server-global
   item, so the same `ItemId` works for every user.
 - `sessions list / message / stop / pause / unpause` — active sessions and

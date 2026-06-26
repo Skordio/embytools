@@ -15,7 +15,7 @@ Add `--help` to any command or group for its built-in usage.
 | [`users`](users.md) | `list` |
 | [`channels`](channels.md) | `list`, `all`, `copy`, `export`, `import` |
 | [`channels numbers`](channels-numbers.md) | `schemes`, `generate`, `apply`, `export`, `clear` |
-| [`channels tags`](channels-tags.md) | `list`, `channels`, `show`, `add`, `remove`, `set`, `export`, `import` |
+| [`channels tags`](channels-tags.md) | `list`, `channels`, `show`, `add`, `remove`, `set`, `schemes`, `generate`, `export`, `import` |
 | [`sessions`](sessions.md) | `list`, `message`, `stop`, `pause`, `unpause` |
 
 ## Shared conventions
@@ -63,5 +63,13 @@ files keep working across those events.
 ### Snapshots
 
 Write commands that can take a safety snapshot do so before mutating, writing a
-timestamped backup into the `snapshots/` directory (override with `--export-dir`,
-skip with `--no-snapshot` where offered).
+timestamped backup under the `snapshots/` directory (override the base with
+`--export-dir`, skip with `--no-snapshot` where offered). Snapshots are filed
+into a per-type subdirectory of that base so they stay organized:
+
+- `snapshots/favorites/` — favorite-channel snapshots (`copy --export`, `import`)
+- `snapshots/numbers/` — channel-number snapshots (`numbers apply`, `numbers clear`)
+- `snapshots/tags/` — channel-tag snapshots (`tags import`)
+
+(Explicit `export <file>` commands write to the exact path you give them — only
+these automatic pre-write snapshots are organized into subdirectories.)

@@ -5,6 +5,7 @@ from fakes import FakeEmby
 from embytools.commands.channels import (
     _apply_tag_changes,
     _resolve_channels,
+    _snapshot_tags,
     _tag_import_plan,
     _tag_names,
 )
@@ -72,6 +73,14 @@ def test_apply_snapshot_runs_only_when_changes_and_not_dry_run():
 
 def _plan_by_name(plan):
     return {c["Name"]: (add, rem) for c, add, rem in plan}
+
+
+def test_snapshot_tags_lands_in_tags_subdir(tmp_path):
+    emby = FakeEmby()
+    _snapshot_tags(emby, tmp_path, [ch("1", "CNN", ["News"])])
+    files = list((tmp_path / "tags").glob("*.json"))
+    assert len(files) == 1 and files[0].name.startswith("channel-tags-")
+    assert not list(tmp_path.glob("*.json"))  # nothing at the root
 
 
 def test_tag_import_single_tag_additive_adds_only_that_tag():

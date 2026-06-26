@@ -199,6 +199,57 @@ def test_channels_numbers_generate_with_plugin(cli_env, tmp_path):
     assert [d["Name"] for d in data] == ["Abc", "Zed"]  # plugin sorted them
 
 
+def test_tags_generate_requires_plugin(cli_env, tmp_path):
+    res = runner.invoke(
+        app, ["channels", "tags", "generate", "drop-letters", str(tmp_path / "x.json")]
+    )
+    assert res.exit_code == 1
+    assert "requires at least one --plugin" in res.output
+
+
+def test_tags_schemes_empty_without_plugin():
+    res = runner.invoke(app, ["channels", "tags", "schemes"])
+    assert res.exit_code == 0
+    assert "No tag schemes registered" in res.output
+
+
+@respx.mock
+def test_channels_tags_generate_with_plugin(cli_env, tmp_path):
+    plugin = tmp_path / "p.py"
+    plugin.write_text(
+        "from embytools.livetv import tag_scheme\n"
+        "@tag_scheme('drop-letters')\n"
+        "def d(ctx):\n"
+        "    out = []\n"
+        "    for c in ctx.channels:\n"
+        "        tags = [t['Name'] for t in (c.get('TagItems') or [])]\n"
+        "        out.append({'Name': c['Name'], 'Tags': [t for t in tags if len(t) > 1]})\n"
+        "    return out\n"
+    )
+    respx.get(f"{BASE}/Users").mock(
+        return_value=httpx.Response(200, json=[{"Name": "Steve", "Id": "s"}])
+    )
+    respx.get(f"{BASE}/LiveTv/Channels").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {"Id": "1", "Name": "CNN", "TagItems": [{"Name": "A"}, {"Name": "News"}]},
+                ]
+            },
+        )
+    )
+    out = tmp_path / "out.json"
+    res = runner.invoke(
+        app,
+        ["channels", "tags", "generate", "drop-letters", str(out), "--plugin", str(plugin)],
+    )
+    assert res.exit_code == 0, res.output
+    data = json.loads(out.read_text())
+    assert data["type"] == "livetv-channel-tags"
+    assert data["data"] == [{"Name": "CNN", "Tags": ["News"]}]  # the "A" letter tag dropped
+
+
 @respx.mock
 def test_channels_numbers_apply_dry_run_cli(cli_env, tmp_path):
     f = tmp_path / "nums.json"
